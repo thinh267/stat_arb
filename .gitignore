@@ -1,1 +1,9 @@
+# Bỏ qua file môi trường
 .env
+
+# Bỏ qua cache Python
+__pycache__/
+*.pyc
+
+# Bỏ qua log
+*.log
