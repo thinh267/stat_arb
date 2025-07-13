@@ -1,0 +1,9 @@
+flask
+requests
+python-dotenv
+supabase
+pandas
+numpy
+schedule
+python-binance
+statsmodels 
