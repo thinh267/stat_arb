@@ -119,6 +119,20 @@ class SupabaseManager:
             print(f"Error getting all open positions: {e}")
             return []
 
+    def get_closed_positions(self):
+        """
+        Lấy tất cả closed positions
+        """
+        try:
+            result = self.client.table('positions') \
+                .select('*') \
+                .eq('status', 'CLOSED') \
+                .execute()
+            return result.data
+        except Exception as e:
+            print(f"Error getting closed positions: {e}")
+            return []
+
     def update_hourly_ranking(self, ranking_data):
         try:
             result = self.client.table('hourly_rankings').insert(ranking_data).execute()
@@ -126,6 +140,21 @@ class SupabaseManager:
         except Exception as e:
             print(f"Error updating hourly ranking: {e}")
             return None
+
+    def get_hourly_rankings(self):
+        """
+        Lấy hourly rankings mới nhất
+        """
+        try:
+            result = self.client.table('hourly_rankings') \
+                .select('*') \
+                .order('timestamp', desc=True) \
+                .limit(20) \
+                .execute()
+            return result.data
+        except Exception as e:
+            print(f"Error getting hourly rankings: {e}")
+            return []
 
     def save_trading_signal(self, signal_data):
         try:
@@ -180,13 +209,15 @@ class SupabaseManager:
             print(f"Error saving position: {e}")
             return None
 
-    def update_position_status(self, position_id, status, pnl=None):
+    def update_position_status(self, position_id, status, pnl=None, reason=None):
         try:
             update_data = {'status': status}
             if pnl is not None:
                 update_data['pnl'] = pnl
             if status == 'CLOSED':
-                update_data['exit_time'] = datetime.now()
+                update_data['exit_time'] = datetime.now().isoformat()
+            if reason is not None:
+                update_data['reason'] = reason
             result = self.client.table('positions') \
                 .update(update_data) \
                 .eq('id', position_id) \
@@ -236,24 +267,6 @@ class SupabaseManager:
         except Exception as e:
             print(f"Error saving correlation stats: {e}")
             return None
-
-    def clear_table(self, table_name):
-        """
-        Xóa dữ liệu trong bảng chỉ định
-        - hourly_rankings: Xóa data cũ trong cùng ngày (vì chạy nhiều lần/ngày)
-        - Các bảng khác: Không xóa, chỉ add-on thêm data
-        """
-        try:
-            if table_name == 'hourly_rankings':
-                # Chỉ xóa data trong cùng ngày vì hourly_rankings chạy nhiều lần/ngày
-                today = datetime.now().date()
-                self.client.table('hourly_rankings').delete().eq('date', str(today)).execute()
-                print(f"Đã xóa data cũ trong bảng {table_name} cho ngày {today}")
-            else:
-                # Các bảng khác: Không xóa, chỉ add-on
-                print(f"Không xóa bảng {table_name}, sẽ add-on thêm data")
-        except Exception as e:
-            print(f"Lỗi khi xử lý bảng {table_name}: {e}") 
 
     def get_pair_id_from_pairs(self, pair1, pair2):
         """

@@ -507,7 +507,6 @@ def scan_market_for_stable_pairs_optimized():
 
 def reorder_pairs_by_correlation():
     # Get today's pairs
-    today = datetime.now().date()
     top_pairs = supabase_manager.get_current_top_n(DAILY_TOP_N)
     ranking_data = []
     
@@ -529,15 +528,6 @@ def reorder_pairs_by_correlation():
             print(f"✅ {pair['pair1']}-{pair['pair2']}: rank {idx+1}, corr {correlation:.4f}, pair_id {pair['id']}")
         else:
             print(f"⚠️ Bỏ qua {pair['pair1']}-{pair['pair2']}: không tính được correlation")
-    
-    if ranking_data:
-        # Clear old hourly rankings trước khi insert mới
-        supabase_manager.clear_table('hourly_rankings')
-        supabase_manager.update_hourly_ranking(ranking_data)
-        print(f"✅ Đã cập nhật hourly rankings với {len(ranking_data)} pairs")
-    else:
-        print("⚠️ Không có ranking data để cập nhật")
-    
     return ranking_data
 
 # Alias cho backward compatibility

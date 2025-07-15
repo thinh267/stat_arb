@@ -22,31 +22,48 @@ supabase_manager = SupabaseManager()
 
 
 def get_top_pairs_from_db():
-    """Lấy top 10 pairs từ database"""
+    """Lấy top 10 pairs từ hourly_rankings (ranking mới nhất)"""
     try:
-        # Lấy top pairs từ database
-        top_pairs = supabase_manager.get_top_pairs()
+        # Lấy top pairs từ hourly_rankings (ranking mới nhất)
+        hourly_rankings = supabase_manager.get_hourly_rankings()
         
-        if top_pairs and len(top_pairs) > 0:
-            print(f"📊 Lấy được {len(top_pairs)} top pairs từ database")
-            return top_pairs[:10]  # Chỉ lấy top 10
+        if hourly_rankings and len(hourly_rankings) > 0:
+            # Sắp xếp theo current_rank và lấy top 10
+            sorted_rankings = sorted(hourly_rankings, key=lambda x: x.get('current_rank', 999))
+            top_10_rankings = sorted_rankings[:10]
+            
+            # Chuyển đổi thành format pairs
+            top_pairs = []
+            for ranking in top_10_rankings:
+                pair_id = ranking.get('pair_id')
+                if pair_id:
+                    # Lấy thông tin pair từ pair_id
+                    pair_info = supabase_manager.get_pair_by_id(pair_id)
+                    if pair_info:
+                        top_pairs.append({
+                            'pair1': pair_info['pair1'],
+                            'pair2': pair_info['pair2'],
+                            'rank': ranking.get('current_rank'),
+                            'correlation': ranking.get('current_correlation'),
+                            'pair_id': pair_id
+                        })
+            
+            print(f"📊 Lấy được {len(top_pairs)} top pairs từ hourly_rankings")
+            return top_pairs
         else:
-            print("⚠️  Không có top pairs trong database, sử dụng fallback")
-            return get_fallback_pairs()
+            print("⚠️  Không có hourly_rankings, thử lấy từ daily_pairs...")
+            # Fallback: lấy từ daily_pairs
+            top_pairs = supabase_manager.get_top_pairs()
+            if top_pairs and len(top_pairs) > 0:
+                print(f"📊 Lấy được {len(top_pairs)} top pairs từ daily_pairs")
+                return top_pairs[:10]
+            else:
+                print("⚠️  Không có top pairs trong database, sử dụng fallback")
+                return get_fallback_pairs()
             
     except Exception as e:
         print(f"❌ Error getting top pairs from DB: {e}")
         return get_fallback_pairs()
-
-def get_fallback_pairs():
-    """Fallback pairs nếu không có data từ database"""
-    return [
-        {"pair1": "BTCUSDT", "pair2": "ETHUSDT"},
-        {"pair1": "SOLUSDT", "pair2": "AVAXUSDT"},
-        {"pair1": "ADAUSDT", "pair2": "DOTUSDT"},
-        {"pair1": "MATICUSDT", "pair2": "LINKUSDT"},
-        {"pair1": "BNBUSDT", "pair2": "XRPUSDT"}
-    ]
 
 def get_klines_data(symbol, interval="1h", limit=168):
     """Lấy dữ liệu klines từ Binance API - sử dụng futures API"""
@@ -222,26 +239,7 @@ def generate_signals_for_top_pairs(timeframe="1h"):
         print(f"{rank:<5} {symbol:<12} {z_score:<10} {signal:<8} {spread:<12}")
     return signals_df.to_dict('records')
 
-def save_signals_to_db(signals):
-    """Lưu signals vào database"""
-    if not signals:
-        print("❌ Không có signals để lưu")
-        return False
-    
-    try:
-        # Lưu signals vào database
-        success = supabase_manager.save_pair_signals(signals)
-        
-        if success:
-            print(f"✅ Đã lưu {len(signals)} pair signals vào database")
-        else:
-            print("❌ Lỗi khi lưu signals vào database")
-        
-        return success
-        
-    except Exception as e:
-        print(f"❌ Error saving signals to DB: {e}")
-        return False
+
 
 def generate_and_save_signals():
     """Tạo và lưu signals cho pairs"""
@@ -253,65 +251,18 @@ def generate_and_save_signals():
     
     if not signals:
         print("❌ Không tạo được signals")
-        return False
+        return []
     
     # Lưu signals vào database
     success = supabase_manager.save_pair_signals(signals)
     
     if success:
         print("✅ Signal generation hoàn thành!")
-        return True
+        return signals  # Trả về list signals thay vì bool
     else:
         print("❌ Lỗi khi lưu signals")
-        return False
+        return []
 
-def test_pair_signal_generation():
-    """Test signal generation cho pairs"""
-    print("🧪 TEST PAIR SIGNAL GENERATION")
-    print("=" * 50)
-    
-    # Test với một số pairs
-    test_pairs = [
-        {"pair1": "BTCUSDT", "pair2": "ETHUSDT"},
-        {"pair1": "SOLUSDT", "pair2": "AVAXUSDT"},
-        {"pair1": "ADAUSDT", "pair2": "DOTUSDT"}
-    ]
-    
-    print(f"📊 Testing signal generation cho {len(test_pairs)} pairs...")
-    
-    signals = []
-    for pair in test_pairs:
-        pair1 = pair['pair1']
-        pair2 = pair['pair2']
-        
-        z_score, spread, mean, std = calculate_pair_z_score(pair1, pair2)
-        
-        if z_score is not None:
-            if z_score > 2.0:
-                signal_type = 'SELL_PAIR1_BUY_PAIR2'
-            elif z_score < -2.0:
-                signal_type = 'BUY_PAIR1_SELL_PAIR2'
-            else:
-                signal_type = 'NEUTRAL'
-            
-            confidence = min(abs(z_score) / 3.0, 1.0)
-            
-            signal = {
-                'pair1': pair1,
-                'pair2': pair2,
-                'z_score': z_score,
-                'spread': spread,
-                'signal_type': signal_type,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            signals.append(signal)
-            print(f"✅ {pair1}-{pair2}: Z-score={z_score:.3f}, Signal={signal_type}, Spread={spread:.2f}")
-        else:
-            print(f"❌ {pair1}-{pair2}: Không tính được z-score")
-    
-    print(f"\n📊 Test results: {len(signals)} pair signals generated")
-    return signals
 
 def main():
     """Main function"""
