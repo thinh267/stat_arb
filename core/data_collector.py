@@ -376,7 +376,6 @@ def analyze_correlation_stats(results_df):
 
     # Lưu thống kê vào Supabase
     supabase_manager = SupabaseManager()
-    supabase_manager.clear_table('correlation_stats')
     success = supabase_manager.save_correlation_stats(stats)
     if success:
         print("✅ Đã lưu correlation stats vào Supabase thành công!")

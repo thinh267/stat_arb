@@ -1,6 +1,5 @@
 # main.py
-from scheduler.scheduler import run_scheduler, daily_task
+from scheduler.scheduler import run_scheduler
 
-if __name__ == "__main__": 
-    daily_task()    
-    run_scheduler()
+if __name__ == "__main__":  
+    run_scheduler()   
