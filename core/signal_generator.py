@@ -254,6 +254,7 @@ def generate_and_save_signals():
         return []
     
     # Lưu signals vào database
+    print(f"[DEBUG] Đang lưu {len(signals)} signals vào database...")
     success = supabase_manager.save_pair_signals(signals)
     
     if success:
@@ -277,5 +278,6 @@ def main():
     else:
         print("❌ Có lỗi trong pair signal generation")
 
-if __name__ == "__main__":
-    main() 
+
+# if __name__ == "__main__":
+#     main() 

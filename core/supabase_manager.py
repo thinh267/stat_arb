@@ -134,11 +134,14 @@ class SupabaseManager:
             return []
 
     def update_hourly_ranking(self, ranking_data):
+        print(f"[DEBUG] Gửi dữ liệu lên hourly_rankings: {ranking_data}")
         try:
             result = self.client.table('hourly_rankings').insert(ranking_data).execute()
+            print(f"[DEBUG] Kết quả insert hourly_rankings: {result}")
             return result.data
         except Exception as e:
             print(f"Error updating hourly ranking: {e}")
+            print(f"[DEBUG] Lỗi khi insert hourly_rankings với dữ liệu: {ranking_data}")
             return None
 
     def get_hourly_rankings(self):
@@ -155,14 +158,6 @@ class SupabaseManager:
         except Exception as e:
             print(f"Error getting hourly rankings: {e}")
             return []
-
-    def save_trading_signal(self, signal_data):
-        try:
-            result = self.client.table('trading_signals').insert(signal_data).execute()
-            return result.data
-        except Exception as e:
-            print(f"Error saving signal: {e}")
-            return None
 
     def save_pair_signals(self, signals):
         """
@@ -268,81 +263,22 @@ class SupabaseManager:
             print(f"Error saving correlation stats: {e}")
             return None
 
-    def get_pair_id_from_pairs(self, pair1, pair2):
-        """
-        Lấy pair_id mới nhất từ daily_pairs table dựa trên pair1 và pair2
-        """
-        try:
-            # Tìm pair với pair1 và pair2, lấy record mới nhất (id lớn nhất)
-            result = self.client.table('daily_pairs') \
-                .select('id') \
-                .or_(f'pair1.eq.{pair1},pair2.eq.{pair1}') \
-                .or_(f'pair1.eq.{pair2},pair2.eq.{pair2}') \
-                .order('id', desc=True) \
-                .limit(1) \
-                .execute()
-            
-            if result.data and len(result.data) > 0:
-                return result.data[0]['id']
-            else:
-                print(f"⚠️ Không tìm thấy pair_id cho {pair1}-{pair2}")
-                return None
-                
-        except Exception as e:
-            print(f"Error getting pair_id for {pair1}-{pair2}: {e}")
-            return None
-
     def get_latest_pair_id(self, pair1, pair2):
-        """
-        Lấy pair_id mới nhất cho một cặp pair cụ thể
-        """
         try:
-            print(f"🔍 Searching for pair_id: {pair1}-{pair2}")
-            
-            # Tìm pair với chính xác pair1 và pair2, lấy theo id lớn nhất (mới nhất)
+            # Query cả hai chiều
             result = self.client.table('daily_pairs') \
                 .select('id, date, pair1, pair2') \
-                .eq('pair1', pair1) \
-                .eq('pair2', pair2) \
+                .or_(f'(pair1.eq.{pair1},pair2.eq.{pair2}),(pair1.eq.{pair2},pair2.eq.{pair1})') \
                 .order('id', desc=True) \
                 .limit(1) \
                 .execute()
-            
-            print(f"📊 Query result for {pair1}-{pair2}: {len(result.data)} records")
-            if result.data:
-                for record in result.data:
-                    print(f"   - ID: {record['id']}, Date: {record['date']}, Pair: {record['pair1']}-{record['pair2']}")
-            
             if result.data and len(result.data) > 0:
-                pair_id = result.data[0]['id']
-                date = result.data[0]['date']
-                print(f"✅ Found pair_id {pair_id} for {pair1}-{pair2} (date: {date})")
-                return pair_id
+                record = result.data[0]
+                print(f"✅ Found latest pair_id {record['id']} for {pair1}-{pair2} or {pair2}-{pair1} (date: {record['date']})")
+                return record['id']
             else:
-                # Thử ngược lại (pair2-pair1)
-                print(f"🔄 Trying reverse order: {pair2}-{pair1}")
-                result = self.client.table('daily_pairs') \
-                    .select('id, date, pair1, pair2') \
-                    .eq('pair1', pair2) \
-                    .eq('pair2', pair1) \
-                    .order('id', desc=True) \
-                    .limit(1) \
-                    .execute()
-                
-                print(f"📊 Query result for {pair2}-{pair1}: {len(result.data)} records")
-                if result.data:
-                    for record in result.data:
-                        print(f"   - ID: {record['id']}, Date: {record['date']}, Pair: {record['pair1']}-{record['pair2']}")
-                
-                if result.data and len(result.data) > 0:
-                    pair_id = result.data[0]['id']
-                    date = result.data[0]['date']
-                    print(f"✅ Found pair_id {pair_id} for {pair2}-{pair1} (date: {date})")
-                    return pair_id
-                else:
-                    print(f"⚠️ Không tìm thấy pair_id cho {pair1}-{pair2}")
-                    return None
-                    
+                print(f"⚠️ Không tìm thấy pair_id cho {pair1}-{pair2} hoặc {pair2}-{pair1}")
+                return None
         except Exception as e:
             print(f"❌ Error getting latest pair_id for {pair1}-{pair2}: {e}")
             return None 

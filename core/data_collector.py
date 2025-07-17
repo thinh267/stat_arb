@@ -527,6 +527,9 @@ def reorder_pairs_by_correlation():
             print(f"✅ {pair['pair1']}-{pair['pair2']}: rank {idx+1}, corr {correlation:.4f}, pair_id {pair['id']}")
         else:
             print(f"⚠️ Bỏ qua {pair['pair1']}-{pair['pair2']}: không tính được correlation")
+    # Bổ sung cập nhật vào database
+    if ranking_data:
+        supabase_manager.update_hourly_ranking(ranking_data)
     return ranking_data
 
 # Alias cho backward compatibility
