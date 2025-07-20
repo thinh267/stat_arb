@@ -3,7 +3,7 @@ import time
 from datetime import datetime
 import threading
 from core.data_collector import scan_market_for_stable_pairs, reorder_pairs_by_correlation
-from core.signal_generator import generate_signals_for_top_pairs
+from core.signal_generator import generate_and_save_signals
 from core.supabase_manager import SupabaseManager
 from config import DAILY_TOP_N, HOURLY_UPDATE_INTERVAL, SIGNAL_CHECK_INTERVAL
 
@@ -19,8 +19,12 @@ def hourly_task():
 
 def signal_task():
     print(f"[Signal] {datetime.now()} - Generating trading signals...")
-    for tf in ['15m', '30m']:
-        generate_signals_for_top_pairs(timeframe=tf)
+    print(f"[Signal] Đang tạo signals cho timeframe 15m...")
+    signals = generate_and_save_signals()
+    if signals:
+        print(f"[Signal] ✅ Hoàn thành tạo và lưu signals cho timeframe 15m")
+    else:
+        print(f"[Signal] ⚠️ Không có signals nào cho timeframe 15m")
 
 def run_scheduler():
     # Run daily at 9:00

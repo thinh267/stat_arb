@@ -65,7 +65,7 @@ def get_top_pairs_from_db():
         print(f"❌ Error getting top pairs from DB: {e}")
         return get_fallback_pairs()
 
-def get_klines_data(symbol, interval="1h", limit=168):
+def get_klines_data(symbol, interval="15m", limit=168):
     """Lấy dữ liệu klines từ Binance API - sử dụng futures API"""
     try:
         # Sử dụng futures API thay vì spot API
@@ -95,7 +95,7 @@ def get_klines_data(symbol, interval="1h", limit=168):
         print(f"❌ Error getting klines data for {symbol}: {e}")
         return None
 
-def calculate_pair_z_score(pair1, pair2, window=20, timeframe="1h"):
+def calculate_pair_z_score(pair1, pair2, window=20, timeframe="15m"):
     """Tính z-score cho một cặp pairs"""
     try:
         # Lấy dữ liệu cho cả hai pairs từ Binance API
@@ -127,7 +127,7 @@ def calculate_pair_z_score(pair1, pair2, window=20, timeframe="1h"):
         print(f"❌ Error calculating pair z-score for {pair1}-{pair2}: {e}")
         return None, None, None, None
 
-def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
+def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="15m"):
     """Tính z-score cho một batch pairs, luôn print kết quả, chỉ lưu BUY/SELL, không lưu NEUTRAL"""
     results = []
     for pair in pairs_batch:
@@ -182,7 +182,7 @@ def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
                 # Không lưu NEUTRAL
     return results
 
-def generate_signals_for_top_pairs(timeframe="1h"):
+def generate_signals_for_top_pairs(timeframe="15m"):
     """Tạo signals cho top 10 pairs từ database với timeframe tuỳ chọn"""
     print(f"🚀 GENERATING SIGNALS FOR TOP 10 PAIRS (timeframe={timeframe})")
     print("=" * 60)
@@ -239,8 +239,6 @@ def generate_signals_for_top_pairs(timeframe="1h"):
         print(f"{rank:<5} {symbol:<12} {z_score:<10} {signal:<8} {spread:<12}")
     return signals_df.to_dict('records')
 
-
-
 def generate_and_save_signals():
     """Tạo và lưu signals cho pairs"""
     print("🚀 SIGNAL GENERATOR - TOP 10 PAIRS")
@@ -277,7 +275,3 @@ def main():
         print("🎉 Pair signal generation hoàn thành!")
     else:
         print("❌ Có lỗi trong pair signal generation")
-
-
-# if __name__ == "__main__":
-#     main() 
