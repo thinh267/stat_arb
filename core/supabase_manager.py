@@ -265,10 +265,10 @@ class SupabaseManager:
 
     def get_latest_pair_id(self, pair1, pair2):
         try:
-            # Query cả hai chiều
+            # Query cả hai chiều đúng cú pháp .or_
             result = self.client.table('daily_pairs') \
                 .select('id, date, pair1, pair2') \
-                .or_(f'(pair1.eq.{pair1},pair2.eq.{pair2}),(pair1.eq.{pair2},pair2.eq.{pair1})') \
+                .or_('and(pair1.eq.{},pair2.eq.{}),and(pair1.eq.{},pair2.eq.{})'.format(pair1, pair2, pair2, pair1)) \
                 .order('id', desc=True) \
                 .limit(1) \
                 .execute()
