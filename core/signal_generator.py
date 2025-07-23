@@ -244,8 +244,8 @@ def generate_and_save_signals():
     print("🚀 SIGNAL GENERATOR - TOP 10 PAIRS")
     print("=" * 60)
     
-    # Tạo signals cho top pairs
-    signals = generate_signals_for_top_pairs()
+    # Tạo signals cho top pairs với timeframe 1h
+    signals = generate_signals_for_top_pairs(timeframe="1h")
     
     if not signals:
         print("❌ Không tạo được signals")

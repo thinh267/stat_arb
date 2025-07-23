@@ -62,30 +62,17 @@ def save_daily_performance_to_db(daily_df):
     """
     Lưu daily performance vào database, nếu đã có ngày đó thì update, chưa có thì insert
     """
+    supabase_manager = SupabaseManager()
+    print(f"[DEBUG] Đang lưu daily performance vào database: {daily_df}")
     try:
-        supabase_manager = SupabaseManager()
-        for _, row in daily_df.iterrows():
-            date_str = str(row['date'])
-            # Kiểm tra đã có bản ghi cho ngày này chưa
-            existing = supabase_manager.get_daily_performance(date_str)
-            data = {
-                'date': date_str,
-                'total_pnl': float(row['total_pnl']),
-                'win_rate': float(row['win_rate']),
-                'total_trades': int(row['total_trades']),
-                'profitable_trades': int(row['profitable_trades'])
-            }
-            if existing and len(existing) > 0:
-                # Update bản ghi cũ (ghi đè)
-                supabase_manager.client.table('daily_performance').update(data).eq('date', date_str).execute()
-            else:
-                # Insert mới
-                supabase_manager.save_daily_performance([data])
-        print(f"✅ Đã lưu {len(daily_df)} daily performance records")
-        return True
+        data = daily_df.to_dict('records') if hasattr(daily_df, 'to_dict') else daily_df
+        result = supabase_manager.save_daily_performance(data)
+        print(f"[DEBUG] Kết quả insert daily_performance: {result}")
+        return result
     except Exception as e:
-        print(f"❌ Lỗi khi lưu daily performance: {e}")
-        return False
+        print(f"Error saving daily performance: {e}")
+        print(f"[DEBUG] Lỗi khi insert daily_performance với dữ liệu: {daily_df}")
+        return None
 
 def run_backtest_from_positions():
     """

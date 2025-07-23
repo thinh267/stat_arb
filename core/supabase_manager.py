@@ -169,11 +169,19 @@ class SupabaseManager:
             for signal in signals:
                 # Tìm pair_id mới nhất từ daily_pairs table
                 pair_id = self.get_latest_pair_id(signal['pair1'], signal['pair2'])
-                
                 if pair_id is None:
                     print(f"⚠️ Bỏ qua signal cho {signal['pair1']}-{signal['pair2']} (không tìm thấy pair_id)")
                     continue
-                
+                # Kiểm tra trùng signal trong cùng khung giờ
+                existing = self.client.table('trading_signals') \
+                    .select('id') \
+                    .eq('pair_id', pair_id) \
+                    .eq('signal_type', signal['signal_type']) \
+                    .eq('timestamp', signal['timestamp']) \
+                    .execute()
+                if existing.data and len(existing.data) > 0:
+                    print(f"⚠️ Signal đã tồn tại cho pair_id={pair_id}, type={signal['signal_type']}, timestamp={signal['timestamp']}, bỏ qua!")
+                    continue
                 db_signal = {
                     'pair_id': pair_id,
                     'symbol': signal['symbol'],  # tên coin
