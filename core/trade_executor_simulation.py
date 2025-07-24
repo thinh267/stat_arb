@@ -291,32 +291,24 @@ def monitor_and_execute_trades_simulation():
                     signal_id = signal.get('id')
                     if signal_id in executed_signals:
                         continue
-                    pair1 = signal.get('pair1')
-                    pair2 = signal.get('pair2')
-                    if not pair1 or not pair2:
-                        print(f"⚠️ Không có pair1 hoặc pair2 cho signal {signal_id}")
-                        continue
-                    latest_pair_id = supabase_manager.get_latest_pair_id(pair1, pair2)
-                    if not latest_pair_id:
-                        print(f"⚠️ Không tìm thấy latest_pair_id cho {pair1}-{pair2}")
-                        continue
-                    pair = supabase_manager.get_pair_by_id(latest_pair_id)
-                    if not pair:
-                        print(f"⚠️ Không tìm thấy pair cho signal {signal_id}")
-                        continue
-                    signal['pair_id'] = latest_pair_id  # Cập nhật lại pair_id cho signal
-                    # Lấy rank từ hourly_rankings
                     pair_id = signal.get('pair_id')
+                    if not pair_id:
+                        print(f"⚠️ Không có pair_id cho signal {signal_id}")
+                        continue
+                    pair = supabase_manager.get_pair_by_id(pair_id)
+                    if not pair:
+                        print(f"⚠️ Không tìm thấy pair cho pair_id {pair_id}")
+                        continue
+                    # Lấy rank từ hourly_rankings
                     rank = 10
-                    if pair_id:
-                        try:
-                            hourly_rankings = supabase_manager.get_hourly_rankings()
-                            for ranking in hourly_rankings:
-                                if ranking.get('pair_id') == pair_id:
-                                    rank = ranking.get('current_rank', 10)
-                                    break
-                        except Exception as e:
-                            print(f"⚠️ Không lấy được rank cho pair_id {pair_id}: {e}")
+                    try:
+                        hourly_rankings = supabase_manager.get_hourly_rankings()
+                        for ranking in hourly_rankings:
+                            if ranking.get('pair_id') == pair_id:
+                                rank = ranking.get('current_rank', 10)
+                                break
+                    except Exception as e:
+                        print(f"⚠️ Không lấy được rank cho pair_id {pair_id}: {e}")
                     required_capital = get_capital_by_rank(rank, account_balance)
                     if required_capital > account_balance:
                         print(f"⚠️ Không đủ vốn cho signal {signal_id}: cần {required_capital:.2f}, có {account_balance:.2f}")

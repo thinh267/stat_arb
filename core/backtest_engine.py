@@ -38,26 +38,6 @@ def get_daily_performance_from_positions():
         print(f"❌ Lỗi khi tính daily performance: {e}")
         return pd.DataFrame()
 
-def get_simulation_performance_summary():
-    """
-    Lấy summary performance của simulation (không cần get_all_positions)
-    """
-    try:
-        supabase_manager = SupabaseManager()
-        closed_positions = supabase_manager.get_closed_positions()
-        open_positions = supabase_manager.get_all_open_positions()
-        # Tính tổng PnL
-        total_pnl = sum(pos.get('pnl', 0) for pos in closed_positions)
-        summary = {
-            'closed_positions': len(closed_positions),
-            'open_positions': len(open_positions),
-            'total_realized_pnl': total_pnl,
-        }
-        return summary
-    except Exception as e:
-        print(f"❌ Lỗi khi lấy performance summary: {e}")
-        return {}
-
 def save_daily_performance_to_db(daily_df):
     """
     Lưu daily performance vào database, nếu đã có ngày đó thì update, chưa có thì insert

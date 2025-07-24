@@ -95,7 +95,7 @@ def get_klines_data(symbol, interval="15m", limit=168):
         print(f"❌ Error getting klines data for {symbol}: {e}")
         return None
 
-def calculate_pair_z_score(pair1, pair2, window=20, timeframe="15m"):
+def calculate_pair_z_score(pair1, pair2, window=20, timeframe="1h"):
     """Tính z-score cho một cặp pairs"""
     try:
         # Lấy dữ liệu cho cả hai pairs từ Binance API
@@ -127,7 +127,7 @@ def calculate_pair_z_score(pair1, pair2, window=20, timeframe="15m"):
         print(f"❌ Error calculating pair z-score for {pair1}-{pair2}: {e}")
         return None, None, None, None
 
-def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="15m"):
+def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
     """Tính z-score cho một batch pairs, luôn print kết quả, chỉ lưu BUY/SELL, không lưu NEUTRAL"""
     results = []
     for pair in pairs_batch:
@@ -182,7 +182,7 @@ def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="15m"):
                 # Không lưu NEUTRAL
     return results
 
-def generate_signals_for_top_pairs(timeframe="15m"):
+def generate_signals_for_top_pairs(timeframe="1h"):
     """Tạo signals cho top 10 pairs từ database với timeframe tuỳ chọn"""
     print(f"🚀 GENERATING SIGNALS FOR TOP 10 PAIRS (timeframe={timeframe})")
     print("=" * 60)
