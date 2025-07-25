@@ -172,15 +172,16 @@ class SupabaseManager:
                 if pair_id is None:
                     print(f"⚠️ Bỏ qua signal cho {signal['pair1']}-{signal['pair2']} (không tìm thấy pair_id)")
                     continue
-                # Kiểm tra trùng signal trong cùng khung giờ
+                # Kiểm tra trùng signal trong cùng khung thời gian (theo pair_id, symbol, signal_type, timestamp)
                 existing = self.client.table('trading_signals') \
                     .select('id') \
                     .eq('pair_id', pair_id) \
+                    .eq('symbol', signal['symbol']) \
                     .eq('signal_type', signal['signal_type']) \
                     .eq('timestamp', signal['timestamp']) \
                     .execute()
                 if existing.data and len(existing.data) > 0:
-                    print(f"⚠️ Signal đã tồn tại cho pair_id={pair_id}, type={signal['signal_type']}, timestamp={signal['timestamp']}, bỏ qua!")
+                    print(f"⚠️ Signal đã tồn tại cho pair_id={pair_id}, symbol={signal['symbol']}, type={signal['signal_type']}, timestamp={signal['timestamp']}, bỏ qua!")
                     continue
                 db_signal = {
                     'pair_id': pair_id,

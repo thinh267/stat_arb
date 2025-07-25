@@ -144,8 +144,6 @@ def execute_trade_simulation(signal, pair, account_balance):
         order_id = f"SIM_{int(time.time())}_{symbol}"
         position_data = {
             'pair_id': pair['id'],
-            'pair1': pair['pair1'],  # Lưu thêm pair1
-            'pair2': pair['pair2'],  # Lưu thêm pair2
             'symbol': symbol,
             'entry_price': float(entry_price),
             'quantity': float(quantity),
@@ -155,7 +153,7 @@ def execute_trade_simulation(signal, pair, account_balance):
             'pnl': 0.0,
             'tp': float(tp),
             'sl': float(sl),
-            'z_score': float(z_score)  # Lưu entry_zscore vào DB
+            'z_score': float(z_score)
         }
         saved_position = supabase_manager.save_position(position_data)
         if saved_position:
