@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import time
 from core.supabase_manager import SupabaseManager
 from core.data_collector import get_data
+from collections import defaultdict
 
 # =====================
 # 1. Helper functions
@@ -137,8 +138,15 @@ def execute_trade_simulation(signal, pair, account_balance):
         return None
     quantity = capital / entry_price
     # --- TP/SL logic ---
-    tp = entry_price * 1.10  # Take Profit: +10%
-    sl = entry_price * 0.90  # Stop Loss: -10%
+    if side == 'BUY':
+        tp = entry_price * 1.10
+        sl = entry_price * 0.90
+    elif side == 'SELL':
+        tp = entry_price * 0.90
+        sl = entry_price * 1.10
+    else:
+        tp = None
+        sl = None
     try:
         simulation_balance -= capital
         order_id = f"SIM_{int(time.time())}_{symbol}"
@@ -151,9 +159,10 @@ def execute_trade_simulation(signal, pair, account_balance):
             'entry_time': datetime.now().isoformat(),
             'binance_order_id': order_id,
             'pnl': 0.0,
-            'tp': float(tp),
-            'sl': float(sl),
-            'z_score': float(z_score)
+            'tp': float(tp) if tp is not None else None,
+            'sl': float(sl) if sl is not None else None,
+            'z_score': float(z_score),
+            'signal_type': side,  # Thêm trường này
         }
         saved_position = supabase_manager.save_position(position_data)
         if saved_position:
@@ -285,44 +294,51 @@ def monitor_and_execute_trades_simulation():
             if signals:
                 print(f"📊 Tìm thấy {len(signals)} signals mới trong 5 phút")
                 executed_count = 0
+                # Giả sử signals là list các dict đã lấy từ DB
+                signals_by_pair_time = defaultdict(list)
                 for signal in signals:
-                    signal_id = signal.get('id')
-                    if signal_id in executed_signals:
-                        continue
-                    pair_id = signal.get('pair_id')
-                    if not pair_id:
-                        print(f"⚠️ Không có pair_id cho signal {signal_id}")
-                        continue
-                    pair = supabase_manager.get_pair_by_id(pair_id)
-                    if not pair:
-                        print(f"⚠️ Không tìm thấy pair cho pair_id {pair_id}")
-                        continue
-                    # Lấy rank từ hourly_rankings
-                    rank = 10
-                    try:
-                        hourly_rankings = supabase_manager.get_hourly_rankings()
-                        for ranking in hourly_rankings:
-                            if ranking.get('pair_id') == pair_id:
-                                rank = ranking.get('current_rank', 10)
-                                break
-                    except Exception as e:
-                        print(f"⚠️ Không lấy được rank cho pair_id {pair_id}: {e}")
-                    required_capital = get_capital_by_rank(rank, account_balance)
-                    if required_capital > account_balance:
-                        print(f"⚠️ Không đủ vốn cho signal {signal_id}: cần {required_capital:.2f}, có {account_balance:.2f}")
-                        continue
-                    result = execute_trade_simulation(signal, pair, account_balance)
-                    if result:
-                        executed_signals.add(signal_id)
-                        executed_count += 1
-                        print(f"✅ Đã execute signal {signal_id}")
-                        account_balance = get_simulation_balance()
-                        print(f"💰 Balance còn lại: {account_balance:.2f} USD")
-                        if account_balance <= 0:
-                            print("⚠️ Hết vốn, dừng execute trades")
-                            break
+                    key = (signal['pair_id'], signal['timestamp'])
+                    signals_by_pair_time[key].append(signal)
+
+                for (pair_id, timestamp), group in signals_by_pair_time.items():
+                    if len(group) == 2:
+                        for signal in group:
+                            # Gọi execute_trade_simulation(signal, pair, account_balance)
+                            signal_id = signal.get('id')
+                            if signal_id in executed_signals:
+                                continue
+                            pair = supabase_manager.get_pair_by_id(pair_id)
+                            if not pair:
+                                print(f"⚠️ Không tìm thấy pair cho pair_id {pair_id}")
+                                continue
+                            # Lấy rank từ hourly_rankings
+                            rank = 10
+                            try:
+                                hourly_rankings = supabase_manager.get_hourly_rankings()
+                                for ranking in hourly_rankings:
+                                    if ranking.get('pair_id') == pair_id:
+                                        rank = ranking.get('current_rank', 10)
+                                        break
+                            except Exception as e:
+                                print(f"⚠️ Không lấy được rank cho pair_id {pair_id}: {e}")
+                            required_capital = get_capital_by_rank(rank, account_balance)
+                            if required_capital > account_balance:
+                                print(f"⚠️ Không đủ vốn cho signal {signal_id}: cần {required_capital:.2f}, có {account_balance:.2f}")
+                                continue
+                            result = execute_trade_simulation(signal, pair, account_balance)
+                            if result:
+                                executed_signals.add(signal_id)
+                                executed_count += 1
+                                print(f"✅ Đã execute signal {signal_id}")
+                                account_balance = get_simulation_balance()
+                                print(f"💰 Balance còn lại: {account_balance:.2f} USD")
+                                if account_balance <= 0:
+                                    print("⚠️ Hết vốn, dừng execute trades")
+                                    break
+                            else:
+                                print(f"❌ Không thể execute signal {signal_id}")
                     else:
-                        print(f"❌ Không thể execute signal {signal_id}")
+                        print(f"⚠️ Bỏ qua pair {pair_id} tại {timestamp} vì không đủ 2 signal")
                 if executed_count > 0:
                     print(f"🎯 Đã execute {executed_count} signals mới")
                 else:
@@ -380,14 +396,22 @@ def monitor_and_close_positions():
                         position = pair_positions[0]
                         current_zscore = calculate_current_zscore(position)
                         entry_zscore = position.get('z_score', 0)
-                        if entry_zscore > 0 and current_zscore < 0.5:
-                            result = close_position_simulation(position, get_current_price(position['symbol']), reason='Z-score mean reversion (1 leg)')
-                            if result:
-                                closed_positions.append(result)
-                        elif entry_zscore < 0 and current_zscore > -0.5:
-                            result = close_position_simulation(position, get_current_price(position['symbol']), reason='Z-score mean reversion (1 leg)')
-                            if result:
-                                closed_positions.append(result)
+                        # Chỉ đóng lệnh nếu cả hai đều là số thực
+                        if (
+                            entry_zscore is not None and current_zscore is not None
+                            and isinstance(entry_zscore, (float, int))
+                            and isinstance(current_zscore, (float, int))
+                        ):
+                            if entry_zscore > 0 and current_zscore < 0.5:
+                                result = close_position_simulation(position, get_current_price(position['symbol']), reason='Z-score mean reversion (1 leg)')
+                                if result:
+                                    closed_positions.append(result)
+                            elif entry_zscore < 0 and current_zscore > -0.5:
+                                result = close_position_simulation(position, get_current_price(position['symbol']), reason='Z-score mean reversion (1 leg)')
+                                if result:
+                                    closed_positions.append(result)
+                        else:
+                            print(f"⚠️ Không đủ dữ liệu z-score để đóng lệnh đơn cho position {position.get('id')}, entry_zscore={entry_zscore}, current_zscore={current_zscore}")
                 except Exception as e:
                     print(f"❌ Lỗi khi monitor pair {pair_id}: {e}")
             if closed_positions:
