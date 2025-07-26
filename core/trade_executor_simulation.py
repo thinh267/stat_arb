@@ -83,12 +83,18 @@ def get_unique_pair_ids():
 
 def calculate_current_zscore(position):
     try:
-        pair1 = position.get('pair1')
-        pair2 = position.get('pair2')
-        if not pair1 or not pair2:
+        pair_id = position.get('pair_id')
+        if not pair_id:
             return None
-        df1 = get_data(pair1, interval='1h', limit=100)
-        df2 = get_data(pair2, interval='1h', limit=100)
+        
+        # Lấy thông tin pair từ pair_id
+        pair = supabase_manager.get_pair_by_id(pair_id)
+        if not pair:
+            return None
+        
+        # Tính z-score dựa trên pair1, pair2 từ pair info
+        df1 = get_data(pair['pair1'], interval='1h', limit=100)
+        df2 = get_data(pair['pair2'], interval='1h', limit=100)
         if df1 is None or df2 is None:
             return None
         spread = df1['close'] - df2['close']
@@ -139,11 +145,11 @@ def execute_trade_simulation(signal, pair, account_balance):
     quantity = capital / entry_price
     # --- TP/SL logic ---
     if side == 'BUY':
-        tp = entry_price * 1.10
-        sl = entry_price * 0.90
+        tp = entry_price * 1.10  # TP cao hơn entry 10%
+        sl = entry_price * 0.90  # SL thấp hơn entry 10%
     elif side == 'SELL':
-        tp = entry_price * 0.90
-        sl = entry_price * 1.10
+        tp = entry_price * 0.90  # TP thấp hơn entry 10%
+        sl = entry_price * 1.10  # SL cao hơn entry 10%
     else:
         tp = None
         sl = None
@@ -195,10 +201,22 @@ def execute_trade_simulation(signal, pair, account_balance):
 def should_close_position_tp_sl(position, current_price):
     tp = position.get('tp')
     sl = position.get('sl')
-    if tp is not None and current_price >= tp:
-        return True, 'TP hit'
-    if sl is not None and current_price <= sl:
-        return True, 'SL hit'
+    signal_type = position.get('signal_type')
+    
+    if tp is not None and sl is not None:
+        if signal_type == 'BUY':
+            # BUY: TP cao hơn entry, SL thấp hơn entry
+            if current_price >= tp:
+                return True, 'TP hit'
+            elif current_price <= sl:
+                return True, 'SL hit'
+        elif signal_type == 'SELL':
+            # SELL: TP thấp hơn entry, SL cao hơn entry
+            if current_price <= tp:
+                return True, 'TP hit'
+            elif current_price >= sl:
+                return True, 'SL hit'
+    
     return False, None
 
 def should_close_pair_zscore(pair_id):
@@ -206,14 +224,23 @@ def should_close_pair_zscore(pair_id):
         pair_positions = supabase_manager.get_open_positions_by_pair_id(pair_id)
         if len(pair_positions) < 2:
             return False
+        
+        # Tính current z-score cho pair
         current_zscore = calculate_current_zscore(pair_positions[0])
         if current_zscore is None:
             return False
+        
+        # Lấy entry z-score từ position đầu tiên (cả 2 positions có cùng z-score khi mở)
         entry_zscore = pair_positions[0].get('z_score', 0)
+        
+        # Kiểm tra mean reversion
         if entry_zscore > 0 and current_zscore < 0.5:
+            print(f"   📊 Z-score mean reversion: {entry_zscore:.2f} → {current_zscore:.2f} (BUY signal)")
             return True
         elif entry_zscore < 0 and current_zscore > -0.5:
+            print(f"   📊 Z-score mean reversion: {entry_zscore:.2f} → {current_zscore:.2f} (SELL signal)")
             return True
+        
         return False
     except Exception as e:
         print(f"Lỗi khi kiểm tra z-score pair: {e}")
@@ -225,13 +252,26 @@ def close_position_simulation(position, exit_price, reason):
     try:
         entry_price = position['entry_price']
         quantity = position['quantity']
-        pnl = (exit_price - entry_price) * quantity
+        signal_type = position.get('signal_type', 'BUY')
+        
+        # Tính PnL dựa trên signal_type
+        if signal_type == 'BUY':
+            # BUY: PnL = (exit_price - entry_price) * quantity
+            pnl = (exit_price - entry_price) * quantity
+        elif signal_type == 'SELL':
+            # SELL: PnL = (entry_price - exit_price) * quantity
+            pnl = (entry_price - exit_price) * quantity
+        else:
+            pnl = 0
+        
         capital_used = entry_price * quantity
         simulation_balance += capital_used + pnl
+        
         supabase_manager.update_position_status(position['id'], 'CLOSED', pnl=pnl, reason=reason)
         print(f"✅ Đã đóng position {position['symbol']} (SIMULATION)")
         print(f"   - Entry: {entry_price:.4f}")
         print(f"   - Exit: {exit_price:.4f}")
+        print(f"   - Signal type: {signal_type}")
         print(f"   - PnL: {pnl:.2f} USD")
         print(f"   - Balance mới: {simulation_balance:.2f} USD")
         print(f"   - Reason: {reason}")
@@ -294,18 +334,43 @@ def monitor_and_execute_trades_simulation():
             if signals:
                 print(f"📊 Tìm thấy {len(signals)} signals mới trong 5 phút")
                 executed_count = 0
-                # Giả sử signals là list các dict đã lấy từ DB
+                
+                # Group signals theo pair_id và khoảng thời gian (±30s)
                 signals_by_pair_time = defaultdict(list)
                 for signal in signals:
-                    key = (signal['pair_id'], signal['timestamp'])
+                    # Làm tròn timestamp về phút (bỏ giây và microsecond)
+                    timestamp = datetime.fromisoformat(signal['timestamp'].replace('Z', '+00:00'))
+                    timestamp_rounded = timestamp.replace(second=0, microsecond=0)
+                    key = (signal['pair_id'], timestamp_rounded.isoformat())
                     signals_by_pair_time[key].append(signal)
-
-                for (pair_id, timestamp), group in signals_by_pair_time.items():
-                    if len(group) == 2:
+                
+                for (pair_id, timestamp_rounded), group in signals_by_pair_time.items():
+                    # Kiểm tra có đủ 2 symbol khác nhau trong group
+                    symbols_in_group = set(signal['symbol'] for signal in group)
+                    if len(symbols_in_group) == 2:
+                        print(f"✅ Đủ 2 signals cho pair {pair_id} tại {timestamp_rounded}")
+                        
+                        # Kiểm tra trùng position cho cả 2 symbol TRƯỚC khi mở
+                        symbols_to_check = list(symbols_in_group)
+                        positions_exist = []
+                        
+                        for symbol in symbols_to_check:
+                            existing_positions = supabase_manager.get_open_positions_by_symbol(symbol)
+                            if existing_positions:
+                                positions_exist.append(symbol)
+                        
+                        if positions_exist:
+                            print(f"⚠️ Bỏ qua pair {pair_id} vì đã có position cho symbols: {positions_exist}")
+                            continue
+                        
+                        # Nếu cả 2 symbol đều chưa có position, mở cả 2
                         for signal in group:
-                            # Gọi execute_trade_simulation(signal, pair, account_balance)
                             signal_id = signal.get('id')
                             if signal_id in executed_signals:
+                                continue
+                            pair_id = signal.get('pair_id')
+                            if not pair_id:
+                                print(f"⚠️ Không có pair_id cho signal {signal_id}")
                                 continue
                             pair = supabase_manager.get_pair_by_id(pair_id)
                             if not pair:
@@ -338,7 +403,7 @@ def monitor_and_execute_trades_simulation():
                             else:
                                 print(f"❌ Không thể execute signal {signal_id}")
                     else:
-                        print(f"⚠️ Bỏ qua pair {pair_id} tại {timestamp} vì không đủ 2 signal")
+                        print(f"⚠️ Bỏ qua pair {pair_id} tại {timestamp_rounded} vì không đủ 2 signal (có {len(symbols_in_group)} symbol: {symbols_in_group})")
                 if executed_count > 0:
                     print(f"🎯 Đã execute {executed_count} signals mới")
                 else:
@@ -374,26 +439,46 @@ def monitor_and_close_positions():
                         current_price = get_current_price(position['symbol'])
                         if current_price is None:
                             continue
+                        
+                        # Debug info
+                        print(f"   Checking position {position['id']}: {position['symbol']}")
+                        print(f"     Entry price: {position['entry_price']}")
+                        print(f"     Current price: {current_price}")
+                        print(f"     TP: {position.get('tp')}")
+                        print(f"     SL: {position.get('sl')}")
+                        print(f"     Signal type: {position.get('signal_type')}")
+                        
                         should_close, reason = should_close_position_tp_sl(position, current_price)
                         if should_close:
+                            print(f"     ✅ Should close: {reason}")
+                            print(f"     🚀 Testing close position for {reason}")
                             result = close_position_simulation(position, current_price, reason)
                             if result:
                                 closed_positions.append(result)
+                        else:
+                            print(f"     ❌ Should not close")
                     # Lấy lại positions sau khi có thể đã đóng bớt
                     pair_positions = supabase_manager.get_open_positions_by_pair_id(pair_id)
                     # 2. Đóng cả cặp nếu còn đủ 2 lệnh và đạt điều kiện z-score
-                    if len(pair_positions) >= 2 and should_close_pair_zscore(pair_id):
-                        # Lấy lại positions mới nhất trước khi đóng cặp
-                        pair_positions = supabase_manager.get_open_positions_by_pair_id(pair_id)
-                        success = close_pair_positions(pair_id)
-                        if success:
-                            # Lấy lại positions vừa đóng để append vào closed_positions
-                            closed = [p for p in pair_positions if p.get('status') == 'CLOSED']
-                            closed_positions.extend(closed)
+                    if len(pair_positions) >= 2:
+                        print(f"   📊 Checking z-score for pair with {len(pair_positions)} positions")
+                        if should_close_pair_zscore(pair_id):
+                            # Lấy lại positions mới nhất trước khi đóng cặp
+                            pair_positions = supabase_manager.get_open_positions_by_pair_id(pair_id)
+                            success = close_pair_positions(pair_id)
+                            if success:
+                                # Lấy lại positions vừa đóng để append vào closed_positions
+                                closed = [p for p in pair_positions if p.get('status') == 'CLOSED']
+                                closed_positions.extend(closed)
+                        else:
+                            print(f"   📊 Z-score chưa đạt điều kiện đóng cặp")
+                    else:
+                        print(f"   ⚠️ Không đủ 2 positions để check z-score pair")
                     # 3. Nếu chỉ còn 1 lệnh mở, kiểm tra z-score, nếu đạt thì đóng luôn lệnh đó
                     pair_positions = supabase_manager.get_open_positions_by_pair_id(pair_id)
                     if len(pair_positions) == 1:
                         position = pair_positions[0]
+                        print(f"   📊 Checking z-score for single position")
                         current_zscore = calculate_current_zscore(position)
                         entry_zscore = position.get('z_score', 0)
                         # Chỉ đóng lệnh nếu cả hai đều là số thực
@@ -402,14 +487,19 @@ def monitor_and_close_positions():
                             and isinstance(entry_zscore, (float, int))
                             and isinstance(current_zscore, (float, int))
                         ):
+                            print(f"   📊 Single position z-score: {entry_zscore:.2f} → {current_zscore:.2f}")
                             if entry_zscore > 0 and current_zscore < 0.5:
+                                print(f"   ✅ Should close single position: Z-score mean reversion (BUY)")
                                 result = close_position_simulation(position, get_current_price(position['symbol']), reason='Z-score mean reversion (1 leg)')
                                 if result:
                                     closed_positions.append(result)
                             elif entry_zscore < 0 and current_zscore > -0.5:
+                                print(f"   ✅ Should close single position: Z-score mean reversion (SELL)")
                                 result = close_position_simulation(position, get_current_price(position['symbol']), reason='Z-score mean reversion (1 leg)')
                                 if result:
                                     closed_positions.append(result)
+                            else:
+                                print(f"   ❌ Single position z-score chưa đạt điều kiện đóng")
                         else:
                             print(f"⚠️ Không đủ dữ liệu z-score để đóng lệnh đơn cho position {position.get('id')}, entry_zscore={entry_zscore}, current_zscore={current_zscore}")
                 except Exception as e:

@@ -1,6 +1,6 @@
 # supabase_manager.py
 from supabase import create_client, Client
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import SUPABASE_URL, SUPABASE_KEY
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -172,13 +172,18 @@ class SupabaseManager:
                 if pair_id is None:
                     print(f"⚠️ Bỏ qua signal cho {signal['pair1']}-{signal['pair2']} (không tìm thấy pair_id)")
                     continue
-                # Kiểm tra trùng signal trong cùng khung thời gian (theo pair_id, symbol, signal_type, timestamp)
+                # Kiểm tra trùng signal trong cùng khung thời gian (±30s)
+                timestamp = datetime.fromisoformat(signal['timestamp'].replace('Z', '+00:00'))
+                timestamp_start = (timestamp - timedelta(seconds=30)).isoformat()
+                timestamp_end = (timestamp + timedelta(seconds=30)).isoformat()
+                
                 existing = self.client.table('trading_signals') \
                     .select('id') \
                     .eq('pair_id', pair_id) \
                     .eq('symbol', signal['symbol']) \
                     .eq('signal_type', signal['signal_type']) \
-                    .eq('timestamp', signal['timestamp']) \
+                    .gte('timestamp', timestamp_start) \
+                    .lte('timestamp', timestamp_end) \
                     .execute()
                 if existing.data and len(existing.data) > 0:
                     print(f"⚠️ Signal đã tồn tại cho pair_id={pair_id}, symbol={signal['symbol']}, type={signal['signal_type']}, timestamp={signal['timestamp']}, bỏ qua!")
