@@ -65,59 +65,87 @@ class SupabaseManager:
         """
         Lấy thông tin pair theo ID
         """
-        try:
-            result = self.client.table('daily_pairs') \
-                .select('*') \
-                .eq('id', pair_id) \
-                .execute()
-            return result.data[0] if result.data else None
-        except Exception as e:
-            print(f"Error getting pair by ID: {e}")
-            return None
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = self.client.table('daily_pairs') \
+                    .select('*') \
+                    .eq('id', pair_id) \
+                    .execute()
+                return result.data[0] if result.data else None
+            except Exception as e:
+                print(f"Error getting pair by ID (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(1)  # Wait 1 second before retry
+                else:
+                    print(f"❌ Failed to get pair by ID {pair_id} after {max_retries} attempts")
+                    return None
 
     def get_open_positions_by_symbol(self, symbol):
         """
         Lấy open positions theo symbol
         """
-        try:
-            result = self.client.table('positions') \
-                .select('*') \
-                .eq('symbol', symbol) \
-                .eq('status', 'OPEN') \
-                .execute()
-            return result.data
-        except Exception as e:
-            print(f"Error getting open positions: {e}")
-            return []
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = self.client.table('positions') \
+                    .select('*') \
+                    .eq('symbol', symbol) \
+                    .eq('status', 'OPEN') \
+                    .execute()
+                return result.data
+            except Exception as e:
+                print(f"Error getting open positions (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(1)  # Wait 1 second before retry
+                else:
+                    print(f"❌ Failed to get open positions for {symbol} after {max_retries} attempts")
+                    return []
 
     def get_open_positions_by_pair_id(self, pair_id):
         """
         Lấy tất cả open positions theo pair_id
         """
-        try:
-            result = self.client.table('positions') \
-                .select('*') \
-                .eq('pair_id', pair_id) \
-                .eq('status', 'OPEN') \
-                .execute()
-            return result.data
-        except Exception as e:
-            print(f"Error getting open positions by pair_id: {e}")
-            return []
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = self.client.table('positions') \
+                    .select('*') \
+                    .eq('pair_id', pair_id) \
+                    .eq('status', 'OPEN') \
+                    .execute()
+                return result.data
+            except Exception as e:
+                print(f"Error getting open positions by pair_id (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(1)  # Wait 1 second before retry
+                else:
+                    print(f"❌ Failed to get open positions for pair_id {pair_id} after {max_retries} attempts")
+                    return []
 
     def get_all_open_positions(self):
         """
         Lấy tất cả open positions
         """
-        try:
-            result = self.client.table('positions') \
-                .select('*') \
-                .eq('status', 'OPEN') \
-                .execute()
-            return result.data
-        except Exception as e:
-            print(f"Error getting all open positions: {e}")
-            return []
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = self.client.table('positions') \
+                    .select('*') \
+                    .eq('status', 'OPEN') \
+                    .execute()
+                return result.data
+            except Exception as e:
+                print(f"Error getting all open positions (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(1)  # Wait 1 second before retry
+                else:
+                    print(f"❌ Failed to get all open positions after {max_retries} attempts")
+                    return []
 
     def get_closed_positions(self):
         """
@@ -172,18 +200,13 @@ class SupabaseManager:
                 if pair_id is None:
                     print(f"⚠️ Bỏ qua signal cho {signal['pair1']}-{signal['pair2']} (không tìm thấy pair_id)")
                     continue
-                # Kiểm tra trùng signal trong cùng khung thời gian (±30s)
-                timestamp = datetime.fromisoformat(signal['timestamp'].replace('Z', '+00:00'))
-                timestamp_start = (timestamp - timedelta(seconds=30)).isoformat()
-                timestamp_end = (timestamp + timedelta(seconds=30)).isoformat()
-                
+                # Kiểm tra trùng signal chính xác (cùng timestamp, symbol, signal_type)
                 existing = self.client.table('trading_signals') \
                     .select('id') \
                     .eq('pair_id', pair_id) \
                     .eq('symbol', signal['symbol']) \
                     .eq('signal_type', signal['signal_type']) \
-                    .gte('timestamp', timestamp_start) \
-                    .lte('timestamp', timestamp_end) \
+                    .eq('timestamp', signal['timestamp']) \
                     .execute()
                 if existing.data and len(existing.data) > 0:
                     print(f"⚠️ Signal đã tồn tại cho pair_id={pair_id}, symbol={signal['symbol']}, type={signal['signal_type']}, timestamp={signal['timestamp']}, bỏ qua!")
@@ -211,30 +234,44 @@ class SupabaseManager:
             return False
 
     def save_position(self, position_data):
-        try:
-            result = self.client.table('positions').insert(position_data).execute()
-            return result.data
-        except Exception as e:
-            print(f"Error saving position: {e}")
-            return None
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = self.client.table('positions').insert(position_data).execute()
+                return result.data
+            except Exception as e:
+                print(f"Error saving position (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(1)  # Wait 1 second before retry
+                else:
+                    print(f"❌ Failed to save position after {max_retries} attempts")
+                    return None
 
     def update_position_status(self, position_id, status, pnl=None, reason=None):
-        try:
-            update_data = {'status': status}
-            if pnl is not None:
-                update_data['pnl'] = pnl
-            if status == 'CLOSED':
-                update_data['exit_time'] = datetime.now().isoformat()
-            if reason is not None:
-                update_data['reason'] = reason
-            result = self.client.table('positions') \
-                .update(update_data) \
-                .eq('id', position_id) \
-                .execute()
-            return result.data
-        except Exception as e:
-            print(f"Error updating position: {e}")
-            return None
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                update_data = {'status': status}
+                if pnl is not None:
+                    update_data['pnl'] = pnl
+                if status == 'CLOSED':
+                    update_data['exit_time'] = datetime.now().isoformat()
+                if reason is not None:
+                    update_data['reason'] = reason
+                result = self.client.table('positions') \
+                    .update(update_data) \
+                    .eq('id', position_id) \
+                    .execute()
+                return result.data
+            except Exception as e:
+                print(f"Error updating position (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(1)  # Wait 1 second before retry
+                else:
+                    print(f"❌ Failed to update position {position_id} after {max_retries} attempts")
+                    return None
 
     def get_daily_performance(self, date):
         try:

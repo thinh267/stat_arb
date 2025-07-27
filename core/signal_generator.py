@@ -135,6 +135,9 @@ def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
         pair2 = pair['pair2']
         z_score, spread, mean, std = calculate_pair_z_score(pair1, pair2, window, timeframe)
         if z_score is not None and not np.isnan(z_score):
+            # Tạo timestamp chung cho cả 2 signals của pair
+            current_timestamp = datetime.now().isoformat()
+            
             if z_score > 2.0:
                 print(f"{pair1}-{pair2}: z_score={z_score:.3f}, spread={spread:.3f}, {pair1}=SELL, {pair2}=BUY")
                 # SELL pair1, BUY pair2
@@ -145,7 +148,7 @@ def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
                     'signal_type': 'SELL',
                     'z_score': z_score,
                     'spread': spread,
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': current_timestamp
                 })
                 results.append({
                     'pair1': pair1,
@@ -154,7 +157,7 @@ def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
                     'signal_type': 'BUY',
                     'z_score': z_score,
                     'spread': spread,
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': current_timestamp
                 })
             elif z_score < -2.0:
                 print(f"{pair1}-{pair2}: z_score={z_score:.3f}, spread={spread:.3f}, {pair1}=BUY, {pair2}=SELL")
@@ -166,7 +169,7 @@ def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
                     'signal_type': 'BUY',
                     'z_score': z_score,
                     'spread': spread,
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': current_timestamp
                 })
                 results.append({
                     'pair1': pair1,
@@ -175,7 +178,7 @@ def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
                     'signal_type': 'SELL',
                     'z_score': z_score,
                     'spread': spread,
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': current_timestamp
                 })
             else:
                 print(f"{pair1}-{pair2}: z_score={z_score:.3f}, spread={spread:.3f}, NEUTRAL")
@@ -243,6 +246,9 @@ def generate_and_save_signals():
     """Tạo và lưu signals cho pairs"""
     print("🚀 SIGNAL GENERATOR - TOP 10 PAIRS")
     print("=" * 60)
+    
+    # Bỏ logic check thời gian để tránh bỏ lỡ signals quan trọng
+    # Chỉ dựa vào database check để filter trùng lặp
     
     # Tạo signals cho top pairs với timeframe 1h
     signals = generate_signals_for_top_pairs(timeframe="1h")
