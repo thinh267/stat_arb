@@ -511,25 +511,46 @@ def reorder_pairs_by_correlation():
     
     print(f"🔄 Reordering {len(top_pairs)} pairs by correlation...")
     
-    for idx, pair in enumerate(top_pairs):
+    # Tính correlation mới cho tất cả pairs
+    pairs_with_correlation = []
+    for pair in top_pairs:
         correlation, p_value, rolling_corr, vol1, vol2, _ = calculate_correlation_cointegration(pair['pair1'], pair['pair2'])
         if correlation is not None:
-            # Sử dụng ID trực tiếp từ pair đã lấy từ DB
-            ranking_data.append({
-                'timestamp': datetime.now().isoformat(),
-                'pair_id': pair['id'],  # Sử dụng ID trực tiếp từ DB
-                'current_rank': idx + 1,
-                'current_correlation': float(correlation),
-                'rolling_correlation': float(rolling_corr) if rolling_corr is not None else None,
-                'volatility_1': float(vol1) if vol1 is not None else None,
-                'volatility_2': float(vol2) if vol2 is not None else None
+            pairs_with_correlation.append({
+                'pair': pair,
+                'correlation': correlation,
+                'rolling_correlation': rolling_corr,
+                'volatility_1': vol1,
+                'volatility_2': vol2
             })
-            print(f"✅ {pair['pair1']}-{pair['pair2']}: rank {idx+1}, corr {correlation:.4f}, pair_id {pair['id']}")
+            print(f"📊 {pair['pair1']}-{pair['pair2']}: corr {correlation:.4f}")
         else:
             print(f"⚠️ Bỏ qua {pair['pair1']}-{pair['pair2']}: không tính được correlation")
-    # Bổ sung cập nhật vào database
+    
+    # Sắp xếp theo correlation mới (cao → thấp)
+    pairs_with_correlation.sort(key=lambda x: x['correlation'], reverse=True)
+    
+    # Tạo ranking data với rank đúng
+    for idx, pair_data in enumerate(pairs_with_correlation):
+        pair = pair_data['pair']
+        ranking_data.append({
+            'timestamp': datetime.now().isoformat(),
+            'pair_id': pair['id'],
+            'current_rank': idx + 1,  # Rank theo correlation mới
+            'current_correlation': float(pair_data['correlation']),
+            'rolling_correlation': float(pair_data['rolling_correlation']) if pair_data['rolling_correlation'] is not None else None,
+            'volatility_1': float(pair_data['volatility_1']) if pair_data['volatility_1'] is not None else None,
+            'volatility_2': float(pair_data['volatility_2']) if pair_data['volatility_2'] is not None else None
+        })
+        print(f"✅ {pair['pair1']}-{pair['pair2']}: rank {idx+1}, corr {pair_data['correlation']:.4f}, pair_id {pair['id']}")
+    
+    # Cập nhật vào database
     if ranking_data:
         supabase_manager.update_hourly_ranking(ranking_data)
+        print(f"✅ Đã cập nhật hourly ranking với {len(ranking_data)} pairs")
+    else:
+        print("⚠️ Không có ranking data để cập nhật")
+    
     return ranking_data
 
 # Alias cho backward compatibility
