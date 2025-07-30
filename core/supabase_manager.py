@@ -189,18 +189,15 @@ class SupabaseManager:
 
     def save_pair_signals(self, signals):
         """
-        Lưu pair signals vào database
+        Lưu signals vào database, mỗi lần chỉ lưu 1 symbol cho 1 pair, bổ sung market_trend, trend_strength, tp, sl, entry
         """
         try:
-            # Chuẩn bị data cho database
             signals_for_db = []
             for signal in signals:
-                # Tìm pair_id mới nhất từ daily_pairs table
                 pair_id = self.get_latest_pair_id(signal['pair1'], signal['pair2'])
                 if pair_id is None:
                     print(f"⚠️ Bỏ qua signal cho {signal['pair1']}-{signal['pair2']} (không tìm thấy pair_id)")
                     continue
-                # Kiểm tra trùng signal chính xác (cùng timestamp, symbol, signal_type)
                 existing = self.client.table('trading_signals') \
                     .select('id') \
                     .eq('pair_id', pair_id) \
@@ -213,14 +210,18 @@ class SupabaseManager:
                     continue
                 db_signal = {
                     'pair_id': pair_id,
-                    'symbol': signal['symbol'],  # tên coin
+                    'symbol': signal['symbol'],
                     'z_score': signal['z_score'],
                     'spread': signal['spread'],
                     'signal_type': signal['signal_type'],
-                    'timestamp': signal['timestamp']
+                    'timestamp': signal['timestamp'],
+                    'market_trend': signal.get('market_trend'),
+                    'trend_strength': signal.get('trend_strength'),
+                    'tp': signal.get('tp'),
+                    'sl': signal.get('sl'),
+                    'entry': signal.get('entry'),
                 }
                 signals_for_db.append(db_signal)
-            
             if signals_for_db:
                 result = self.client.table('trading_signals').insert(signals_for_db).execute()
                 print(f"✅ Đã lưu {len(signals_for_db)} signals với pair_id mới nhất")
@@ -228,7 +229,6 @@ class SupabaseManager:
             else:
                 print("⚠️ Không có signals nào để lưu")
                 return False
-                
         except Exception as e:
             print(f"Error saving pair signals: {e}")
             return False

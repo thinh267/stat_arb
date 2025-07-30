@@ -95,15 +95,82 @@ def get_klines_data(symbol, interval="15m", limit=168):
         print(f"❌ Error getting klines data for {symbol}: {e}")
         return None
 
+def calculate_volatility_ratio(df1, df2, window=20):
+    """Tính tỷ lệ biến động giữa 2 coins để chọn coin biến động mạnh hơn"""
+    try:
+        # Tính volatility cho từng coin (rolling standard deviation của returns)
+        returns1 = df1['close'].pct_change()
+        returns2 = df2['close'].pct_change()
+        
+        vol1 = returns1.rolling(window=window).std()
+        vol2 = returns2.rolling(window=window).std()
+        
+        # Lấy giá trị hiện tại
+        current_vol1 = vol1.iloc[-1]
+        current_vol2 = vol2.iloc[-1]
+        
+        # Tính tỷ lệ biến động
+        vol_ratio = current_vol1 / current_vol2 if current_vol2 != 0 else 1.0
+        
+        return vol_ratio, current_vol1, current_vol2
+        
+    except Exception as e:
+        print(f"❌ Error calculating volatility ratio: {e}")
+        return 1.0, 0.0, 0.0
+
+def predict_market_trend(pair1, pair2, timeframe="1h"):
+    """Dự đoán xu hướng thị trường dựa trên momentum và volume"""
+    try:
+        # Lấy dữ liệu cho cả hai pairs
+        df1 = get_klines_data(pair1, interval=timeframe, limit=168)
+        df2 = get_klines_data(pair2, interval=timeframe, limit=168)
+        if df1 is None or df2 is None or len(df1) < 20 or len(df2) < 20:
+            return None, None, None
+        # Tính momentum cho từng coin (tỷ lệ thay đổi giá)
+        momentum1 = (df1['close'].iloc[-1] - df1['close'].iloc[-5]) / df1['close'].iloc[-5]
+        momentum2 = (df2['close'].iloc[-1] - df2['close'].iloc[-5]) / df2['close'].iloc[-5]
+        # Tính volume ratio (coin nào có volume cao hơn)
+        avg_volume1 = df1['volume'].tail(10).mean()
+        avg_volume2 = df2['volume'].tail(10).mean()
+        volume_ratio = avg_volume1 / avg_volume2 if avg_volume2 > 0 else 1.0
+        # Tính RSI để xác định xu hướng
+        def calculate_rsi(prices, window=14):
+            delta = prices.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            return rsi
+        rsi1 = calculate_rsi(df1['close']).iloc[-1]
+        rsi2 = calculate_rsi(df2['close']).iloc[-1]
+        # Dự đoán xu hướng:
+        if momentum1 > 0.01 and momentum2 > 0.01:
+            trend = "UP"
+            trend_strength = min(momentum1, momentum2)
+        elif momentum1 < -0.01 and momentum2 < -0.01:
+            trend = "DOWN"
+            trend_strength = max(abs(momentum1), abs(momentum2))
+        else:
+            if volume_ratio > 1.2:
+                trend = "UP" if momentum1 > 0 else "DOWN"
+                trend_strength = abs(momentum1)
+            else:
+                trend = "UP" if momentum2 > 0 else "DOWN"
+                trend_strength = abs(momentum2)
+        return trend, trend_strength, volume_ratio
+    except Exception as e:
+        print(f"❌ Error predicting market trend: {e}")
+        return None, None, None
+
 def calculate_pair_z_score(pair1, pair2, window=20, timeframe="1h"):
-    """Tính z-score cho một cặp pairs"""
+    """Tính z-score cho một cặp pairs và trả về thêm volatility info"""
     try:
         # Lấy dữ liệu cho cả hai pairs từ Binance API
         df1 = get_klines_data(pair1, interval=timeframe, limit=168)
         df2 = get_klines_data(pair2, interval=timeframe, limit=168)
         
         if df1 is None or df2 is None or len(df1) < window or len(df2) < window:
-            return None, None, None, None
+            return None, None, None, None, None, None, None
         
         # Tính spread giữa hai pairs
         spread = df1['close'] - df2['close']
@@ -121,112 +188,155 @@ def calculate_pair_z_score(pair1, pair2, window=20, timeframe="1h"):
         current_mean = rolling_mean.iloc[-1]
         current_std = rolling_std.iloc[-1]
         
-        return current_z_score, current_spread, current_mean, current_std
+        # Tính volatility ratio để chọn coin biến động mạnh hơn
+        vol_ratio, vol1, vol2 = calculate_volatility_ratio(df1, df2, window)
+        
+        return current_z_score, current_spread, current_mean, current_std, vol_ratio, vol1, vol2
         
     except Exception as e:
         print(f"❌ Error calculating pair z-score for {pair1}-{pair2}: {e}")
-        return None, None, None, None
+        return None, None, None, None, None, None, None
 
 def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
-    """Tính z-score cho một batch pairs, luôn print kết quả, chỉ lưu BUY/SELL, không lưu NEUTRAL"""
+    """Tính z-score cho một batch pairs, chỉ lưu signal cho 1 symbol duy nhất trong mỗi pair theo xu hướng thị trường, kèm TP/SL/Entry."""
     results = []
     for pair in pairs_batch:
         pair1 = pair['pair1']
         pair2 = pair['pair2']
-        z_score, spread, mean, std = calculate_pair_z_score(pair1, pair2, window, timeframe)
+        z_score, spread, mean, std, vol_ratio, vol1, vol2 = calculate_pair_z_score(pair1, pair2, window, timeframe)
         if z_score is not None and not np.isnan(z_score):
-            # Tạo timestamp chung cho cả 2 signals của pair
             current_timestamp = datetime.now().isoformat()
-            
+            market_trend, trend_strength, volume_ratio = predict_market_trend(pair1, pair2, timeframe)
+            if market_trend is None:
+                print(f"⚠️ {pair1}-{pair2}: Không thể dự đoán xu hướng thị trường")
+                continue
+            close1 = None
+            close2 = None
+            try:
+                df1 = get_klines_data(pair1, interval=timeframe, limit=1)
+                if df1 is not None and len(df1) > 0:
+                    close1 = float(df1['close'].iloc[-1])
+                df2 = get_klines_data(pair2, interval=timeframe, limit=1)
+                if df2 is not None and len(df2) > 0:
+                    close2 = float(df2['close'].iloc[-1])
+            except Exception as e:
+                print(f"Lỗi lấy giá close mới nhất: {e}")
             if z_score > 2.0:
-                print(f"{pair1}-{pair2}: z_score={z_score:.3f}, spread={spread:.3f}, {pair1}=SELL, {pair2}=BUY")
-                # SELL pair1, BUY pair2
-                results.append({
-                    'pair1': pair1,
-                    'pair2': pair2,
-                    'symbol': pair1,
-                    'signal_type': 'SELL',
-                    'z_score': z_score,
-                    'spread': spread,
-                    'timestamp': current_timestamp
-                })
-                results.append({
-                    'pair1': pair1,
-                    'pair2': pair2,
-                    'symbol': pair2,
-                    'signal_type': 'BUY',
-                    'z_score': z_score,
-                    'spread': spread,
-                    'timestamp': current_timestamp
-                })
+                if market_trend == "UP" and close1:
+                    tp = round(close1 * 1.01, 4)
+                    sl = round(close1 * 0.99, 4)
+                    entry = round(close1, 4)
+                    print(f"📈 {pair1}-{pair2}: z_score={z_score:.3f}, trend=UP → BUY {pair1} TP={tp} SL={sl} ENTRY={entry}")
+                    results.append({
+                        'pair1': pair1,
+                        'pair2': pair2,
+                        'symbol': pair1,
+                        'signal_type': 'BUY',
+                        'z_score': z_score,
+                        'spread': spread,
+                        'market_trend': market_trend,
+                        'trend_strength': trend_strength,
+                        'timestamp': current_timestamp,
+                        'tp': tp,
+                        'sl': sl,
+                        'entry': entry
+                    })
+                elif market_trend == "DOWN" and close2:
+                    tp = round(close2 * 0.99, 4)
+                    sl = round(close2 * 1.01, 4)
+                    entry = round(close2, 4)
+                    print(f"📉 {pair1}-{pair2}: z_score={z_score:.3f}, trend=DOWN → SELL {pair2} TP={tp} SL={sl} ENTRY={entry}")
+                    results.append({
+                        'pair1': pair1,
+                        'pair2': pair2,
+                        'symbol': pair2,
+                        'signal_type': 'SELL',
+                        'z_score': z_score,
+                        'spread': spread,
+                        'market_trend': market_trend,
+                        'trend_strength': trend_strength,
+                        'timestamp': current_timestamp,
+                        'tp': tp,
+                        'sl': sl,
+                        'entry': entry
+                    })
             elif z_score < -2.0:
-                print(f"{pair1}-{pair2}: z_score={z_score:.3f}, spread={spread:.3f}, {pair1}=BUY, {pair2}=SELL")
-                # BUY pair1, SELL pair2
-                results.append({
-                    'pair1': pair1,
-                    'pair2': pair2,
-                    'symbol': pair1,
-                    'signal_type': 'BUY',
-                    'z_score': z_score,
-                    'spread': spread,
-                    'timestamp': current_timestamp
-                })
-                results.append({
-                    'pair1': pair1,
-                    'pair2': pair2,
-                    'symbol': pair2,
-                    'signal_type': 'SELL',
-                    'z_score': z_score,
-                    'spread': spread,
-                    'timestamp': current_timestamp
-                })
-            else:
-                print(f"{pair1}-{pair2}: z_score={z_score:.3f}, spread={spread:.3f}, NEUTRAL")
-                # Không lưu NEUTRAL
+                if market_trend == "UP" and close2:
+                    tp = round(close2 * 1.01, 4)
+                    sl = round(close2 * 0.99, 4)
+                    entry = round(close2, 4)
+                    print(f"📈 {pair1}-{pair2}: z_score={z_score:.3f}, trend=UP → BUY {pair2} TP={tp} SL={sl} ENTRY={entry}")
+                    results.append({
+                        'pair1': pair1,
+                        'pair2': pair2,
+                        'symbol': pair2,
+                        'signal_type': 'BUY',
+                        'z_score': z_score,
+                        'spread': spread,
+                        'market_trend': market_trend,
+                        'trend_strength': trend_strength,
+                        'timestamp': current_timestamp,
+                        'tp': tp,
+                        'sl': sl,
+                        'entry': entry
+                    })
+                elif market_trend == "DOWN" and close1:
+                    tp = round(close1 * 0.99, 4)
+                    sl = round(close1 * 1.01, 4)
+                    entry = round(close1, 4)
+                    print(f"📉 {pair1}-{pair2}: z_score={z_score:.3f}, trend=DOWN → SELL {pair1} TP={tp} SL={sl} ENTRY={entry}")
+                    results.append({
+                        'pair1': pair1,
+                        'pair2': pair2,
+                        'symbol': pair1,
+                        'signal_type': 'SELL',
+                        'z_score': z_score,
+                        'spread': spread,
+                        'market_trend': market_trend,
+                        'trend_strength': trend_strength,
+                        'timestamp': current_timestamp,
+                        'tp': tp,
+                        'sl': sl,
+                        'entry': entry
+                    })
     return results
 
 def generate_signals_for_top_pairs(timeframe="1h"):
-    """Tạo signals cho top 10 pairs từ database với timeframe tuỳ chọn"""
+    """Tạo signals cho top 10 pairs từ database với timeframe tuỳ chọn, lọc trùng symbol."""
     print(f"🚀 GENERATING SIGNALS FOR TOP 10 PAIRS (timeframe={timeframe})")
     print("=" * 60)
-    
     # Lấy top 10 pairs từ database
     top_pairs = get_top_pairs_from_db()
-    
     if not top_pairs:
         print("❌ Không có top pairs để tạo signals")
         return []
-    
     print(f"📊 Đang tạo signals cho {len(top_pairs)} top pairs...")
-    
     # Chia pairs thành batches cho parallel processing
     batch_size = max(1, len(top_pairs) // 4)  # 4 workers
     batches = [top_pairs[i:i + batch_size] for i in range(0, len(top_pairs), batch_size)]
-    
     # Parallel processing
     all_signals = []
     with ThreadPoolExecutor(max_workers=4) as executor:
         future_to_batch = {executor.submit(calculate_pair_z_score_batch, batch, 20, timeframe): batch for batch in batches}
-        
         completed = 0
         for future in as_completed(future_to_batch):
             batch_results = future.result()
             all_signals.extend(batch_results)
             completed += 1
             print(f"📊 Hoàn thành batch {completed}/{len(batches)} ({len(all_signals)} signals)")
-    
     if not all_signals:
         print("❌ Không tạo được signals")
         return []
-    
-    # Tạo DataFrame và phân tích
+    # Lọc trùng: chỉ giữ signal có |z_score| lớn nhất cho mỗi symbol/signal_type
     signals_df = pd.DataFrame(all_signals)
-    
+    signals_df['abs_z'] = signals_df['z_score'].abs()
+    signals_df = signals_df.sort_values('abs_z', ascending=False)
+    signals_df = signals_df.drop_duplicates(subset=['symbol', 'signal_type'], keep='first')
+    signals_df = signals_df.drop(columns=['abs_z'])
     print(f"\n📊 KẾT QUẢ SIGNAL GENERATION:")
     print(f"- Tổng signals: {len(signals_df)}")
     print(f"- Buy: {len(signals_df[signals_df['signal_type'] == 'BUY'])}")
     print(f"- Sell: {len(signals_df[signals_df['signal_type'] == 'SELL'])}")
-    
     # Hiển thị top signals
     print(f"\n🏆 TOP SIGNALS:")
     print("=" * 100)
