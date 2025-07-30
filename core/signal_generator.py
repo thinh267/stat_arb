@@ -198,7 +198,7 @@ def calculate_pair_z_score(pair1, pair2, window=20, timeframe="1h"):
         return None, None, None, None, None, None, None
 
 def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
-    """Tính z-score cho một batch pairs, chỉ lưu signal cho 1 symbol duy nhất trong mỗi pair theo xu hướng thị trường, kèm TP/SL/Entry."""
+    """Tính z-score cho một batch pairs, kết hợp momentum để chọn coin có động lực mạnh hơn."""
     results = []
     for pair in pairs_batch:
         pair1 = pair['pair1']
@@ -210,86 +210,55 @@ def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
             if market_trend is None:
                 print(f"⚠️ {pair1}-{pair2}: Không thể dự đoán xu hướng thị trường")
                 continue
+            # Lấy dữ liệu để tính momentum cho từng coin
             close1 = None
             close2 = None
+            momentum1 = None
+            momentum2 = None
             try:
-                df1 = get_klines_data(pair1, interval=timeframe, limit=1)
-                if df1 is not None and len(df1) > 0:
+                df1 = get_klines_data(pair1, interval=timeframe, limit=168)
+                df2 = get_klines_data(pair2, interval=timeframe, limit=168)
+                if df1 is not None and len(df1) > 5:
                     close1 = float(df1['close'].iloc[-1])
-                df2 = get_klines_data(pair2, interval=timeframe, limit=1)
-                if df2 is not None and len(df2) > 0:
+                    momentum1 = (df1['close'].iloc[-1] - df1['close'].iloc[-5]) / df1['close'].iloc[-5]
+                if df2 is not None and len(df2) > 5:
                     close2 = float(df2['close'].iloc[-1])
+                    momentum2 = (df2['close'].iloc[-1] - df2['close'].iloc[-5]) / df2['close'].iloc[-5]
             except Exception as e:
-                print(f"Lỗi lấy giá close mới nhất: {e}")
-            if z_score > 2.0:
-                if market_trend == "UP" and close1:
-                    tp = round(close1 * 1.01, 4)
-                    sl = round(close1 * 0.99, 4)
-                    entry = round(close1, 4)
-                    print(f"📈 {pair1}-{pair2}: z_score={z_score:.3f}, trend=UP → BUY {pair1} TP={tp} SL={sl} ENTRY={entry}")
+                print(f"Lỗi lấy dữ liệu momentum: {e}")
+            # Logic: Kết hợp z-score, market trend và momentum để chọn coin
+            if abs(z_score) >= 2.0:
+                # Chọn coin có momentum mạnh hơn
+                if momentum1 is not None and momentum2 is not None:
+                    if abs(momentum1) > abs(momentum2):
+                        selected_coin = pair1
+                        selected_close = close1
+                        selected_momentum = momentum1
+                    else:
+                        selected_coin = pair2
+                        selected_close = close2
+                        selected_momentum = momentum2
+                    # Quyết định BUY/SELL dựa trên market trend và momentum
+                    if market_trend == "UP" and selected_momentum > 0:
+                        signal_type = "BUY"
+                        tp = round(selected_close * 1.02, 4)
+                        sl = round(selected_close * 0.98, 4)
+                        entry = round(selected_close, 4)
+                        print(f"📈 {pair1}-{pair2}: z_score={z_score:.3f}, trend=UP, momentum={selected_momentum:.4f} → BUY {selected_coin} TP={tp} SL={sl} ENTRY={entry}")
+                    elif market_trend == "DOWN" and selected_momentum < 0:
+                        signal_type = "SELL"
+                        tp = round(selected_close * 0.98, 4)
+                        sl = round(selected_close * 1.02, 4)
+                        entry = round(selected_close, 4)
+                        print(f"📉 {pair1}-{pair2}: z_score={z_score:.3f}, trend=DOWN, momentum={selected_momentum:.4f} → SELL {selected_coin} TP={tp} SL={sl} ENTRY={entry}")
+                    else:
+                        print(f"⚪ {pair1}-{pair2}: z_score={z_score:.3f}, trend={market_trend}, momentum={selected_momentum:.4f} → Không phù hợp")
+                        continue
                     results.append({
                         'pair1': pair1,
                         'pair2': pair2,
-                        'symbol': pair1,
-                        'signal_type': 'BUY',
-                        'z_score': z_score,
-                        'spread': spread,
-                        'market_trend': market_trend,
-                        'trend_strength': trend_strength,
-                        'timestamp': current_timestamp,
-                        'tp': tp,
-                        'sl': sl,
-                        'entry': entry
-                    })
-                elif market_trend == "DOWN" and close2:
-                    tp = round(close2 * 0.99, 4)
-                    sl = round(close2 * 1.01, 4)
-                    entry = round(close2, 4)
-                    print(f"📉 {pair1}-{pair2}: z_score={z_score:.3f}, trend=DOWN → SELL {pair2} TP={tp} SL={sl} ENTRY={entry}")
-                    results.append({
-                        'pair1': pair1,
-                        'pair2': pair2,
-                        'symbol': pair2,
-                        'signal_type': 'SELL',
-                        'z_score': z_score,
-                        'spread': spread,
-                        'market_trend': market_trend,
-                        'trend_strength': trend_strength,
-                        'timestamp': current_timestamp,
-                        'tp': tp,
-                        'sl': sl,
-                        'entry': entry
-                    })
-            elif z_score < -2.0:
-                if market_trend == "UP" and close2:
-                    tp = round(close2 * 1.01, 4)
-                    sl = round(close2 * 0.99, 4)
-                    entry = round(close2, 4)
-                    print(f"📈 {pair1}-{pair2}: z_score={z_score:.3f}, trend=UP → BUY {pair2} TP={tp} SL={sl} ENTRY={entry}")
-                    results.append({
-                        'pair1': pair1,
-                        'pair2': pair2,
-                        'symbol': pair2,
-                        'signal_type': 'BUY',
-                        'z_score': z_score,
-                        'spread': spread,
-                        'market_trend': market_trend,
-                        'trend_strength': trend_strength,
-                        'timestamp': current_timestamp,
-                        'tp': tp,
-                        'sl': sl,
-                        'entry': entry
-                    })
-                elif market_trend == "DOWN" and close1:
-                    tp = round(close1 * 0.99, 4)
-                    sl = round(close1 * 1.01, 4)
-                    entry = round(close1, 4)
-                    print(f"📉 {pair1}-{pair2}: z_score={z_score:.3f}, trend=DOWN → SELL {pair1} TP={tp} SL={sl} ENTRY={entry}")
-                    results.append({
-                        'pair1': pair1,
-                        'pair2': pair2,
-                        'symbol': pair1,
-                        'signal_type': 'SELL',
+                        'symbol': selected_coin,
+                        'signal_type': signal_type,
                         'z_score': z_score,
                         'spread': spread,
                         'market_trend': market_trend,
