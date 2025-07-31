@@ -6,4 +6,5 @@ pandas
 numpy
 schedule
 python-binance
-statsmodels 
+statsmodels
+scikit-learn 

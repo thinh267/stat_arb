@@ -189,7 +189,7 @@ class SupabaseManager:
 
     def save_pair_signals(self, signals):
         """
-        Lưu signals vào database, mỗi lần chỉ lưu 1 symbol cho 1 pair, bổ sung market_trend, trend_strength, tp, sl, entry
+        Lưu signals vào database với 4 lớp confirmation tracking
         """
         try:
             signals_for_db = []
@@ -220,11 +220,18 @@ class SupabaseManager:
                     'tp': signal.get('tp'),
                     'sl': signal.get('sl'),
                     'entry': signal.get('entry'),
+                    # Thêm 4 lớp confirmation
+                    'rsi_confirmation': signal.get('rsi_confirmation', False),
+                    'macd_confirmation': signal.get('macd_confirmation', False),
+                    'bollinger_confirmation': signal.get('bollinger_confirmation', False),
+                    'linear_confirmation': signal.get('linear_confirmation', False),
+                    'total_confirmations': signal.get('confirmations', 0),
+                    'confirmation_details': signal.get('confirmation_details', '')
                 }
                 signals_for_db.append(db_signal)
             if signals_for_db:
                 result = self.client.table('trading_signals').insert(signals_for_db).execute()
-                print(f"✅ Đã lưu {len(signals_for_db)} signals với pair_id mới nhất")
+                print(f"✅ Đã lưu {len(signals_for_db)} signals với 4 lớp confirmation tracking")
                 return True
             else:
                 print("⚠️ Không có signals nào để lưu")
