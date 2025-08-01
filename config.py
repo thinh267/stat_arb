@@ -29,7 +29,7 @@ CORS_ORIGINS = [origin.strip().strip('"') for origin in CORS_ORIGINS.strip('[]')
 # Trading parameters
 DAILY_TOP_N = int(os.getenv("DAILY_TOP_N", 10))
 HOURLY_UPDATE_INTERVAL = int(os.getenv("HOURLY_UPDATE_INTERVAL", 4))
-SIGNAL_CHECK_INTERVAL = int(os.getenv("SIGNAL_CHECK_INTERVAL", 30))
+SIGNAL_CHECK_INTERVAL = int(os.getenv("SIGNAL_CHECK_INTERVAL", 15))
 DAILY_LIMIT = float(os.getenv("DAILY_LIMIT", 100))
 MAX_PAIRS_PER_DAY = int(os.getenv("MAX_PAIRS_PER_DAY", 10))
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", 0.05))

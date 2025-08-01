@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # STAT ARB Project
 
 ## Tổng quan
@@ -38,10 +37,3 @@ Dự án này là một hệ thống giao dịch thống kê (Statistical Arbitr
    npm install
    npm start
    ```
-
-## Đóng góp
-Pull request và issue luôn được hoan nghênh! 
-=======
-# stat_arb
-statistical arbitrage
->>>>>>> afd00d8e5e93cd4b3f15c86b76594482c4564fc1
