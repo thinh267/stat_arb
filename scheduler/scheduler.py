@@ -19,12 +19,12 @@ def hourly_task():
 
 def signal_task():
     print(f"[Signal] {datetime.now()} - Generating trading signals...")
-    print(f"[Signal] Đang tạo signals cho timeframe 15m...")
+    print(f"[Signal] Đang tạo signals cho timeframe 5m...")
     signals = generate_and_save_signals()
     if signals:
-        print(f"[Signal] ✅ Hoàn thành tạo và lưu signals cho timeframe 15m")
+        print(f"[Signal] ✅ Hoàn thành tạo và lưu signals cho timeframe 5m")
     else:
-        print(f"[Signal] ⚠️ Không có signals nào cho timeframe 15m")
+        print(f"[Signal] ⚠️ Không có signals nào cho timeframe 5m")
 
 def run_scheduler():
     # Run daily at 9:00
@@ -44,7 +44,7 @@ def run_scheduler():
                 hourly_task()
                 time.sleep(60)
             time.sleep(30)
-    # Run every 15 minutes
+    # Run every 5 minutes
     def signal_loop():
         while True:
             now = datetime.now()

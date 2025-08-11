@@ -215,18 +215,10 @@ class SupabaseManager:
                     'spread': signal['spread'],
                     'signal_type': signal['signal_type'],
                     'timestamp': signal['timestamp'],
-                    'market_trend': signal.get('market_trend'),
-                    'trend_strength': signal.get('trend_strength'),
-                    'tp': signal.get('tp'),
-                    'sl': signal.get('sl'),
-                    'entry': signal.get('entry'),
-                    # Thêm 4 lớp confirmation
-                    'rsi_confirmation': signal.get('rsi_confirmation', False),
-                    'macd_confirmation': signal.get('macd_confirmation', False),
-                    'bollinger_confirmation': signal.get('bollinger_confirmation', False),
-                    'linear_confirmation': signal.get('linear_confirmation', False),
-                    'total_confirmations': signal.get('confirmations', 0),
-                    'confirmation_details': signal.get('confirmation_details', '')
+                    'tp': signal['tp'],
+                    'sl': signal['sl'],
+                    'entry': signal['entry'],
+                    'confirmation_details': signal['confirmation_details']
                 }
                 signals_for_db.append(db_signal)
             if signals_for_db:

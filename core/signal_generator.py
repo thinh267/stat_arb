@@ -87,8 +87,11 @@ def get_klines_data(symbol, interval="15m", limit=168):
         for col in numeric_columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # Chuyển đổi timestamp
+        # Chuyển đổi timestamp và đảm bảo timezone consistency
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        
+        # Thêm cột open_time để tương thích với code cũ
+        df['open_time'] = df['timestamp']
         
         return df
         
@@ -97,21 +100,23 @@ def get_klines_data(symbol, interval="15m", limit=168):
         return None
 
 def calculate_volatility_ratio(df1, df2, window=20):
-    """Tính tỷ lệ biến động giữa 2 coins để chọn coin biến động mạnh hơn"""
+    """Tính tỷ lệ biến động giữa 2 coins sử dụng log-returns để công bằng"""
     try:
-        # Tính volatility cho từng coin (rolling standard deviation của returns)
-        returns1 = df1['close'].pct_change()
-        returns2 = df2['close'].pct_change()
+        # Tính volatility cho từng coin (rolling standard deviation của log-returns)
+        log_returns1 = np.log(df1['close']).diff()
+        log_returns2 = np.log(df2['close']).diff()
         
-        vol1 = returns1.rolling(window=window).std()
-        vol2 = returns2.rolling(window=window).std()
+        vol1 = log_returns1.rolling(window=window).std(ddof=1)
+        vol2 = log_returns2.rolling(window=window).std(ddof=1)
         
         # Lấy giá trị hiện tại
         current_vol1 = vol1.iloc[-1]
         current_vol2 = vol2.iloc[-1]
         
-        # Tính tỷ lệ biến động
-        vol_ratio = current_vol1 / current_vol2 if current_vol2 != 0 else 1.0
+        # Tính tỷ lệ biến động với xử lý NaN và zero
+        vol_ratio = 1.0
+        if pd.notna(current_vol1) and pd.notna(current_vol2) and current_vol2 != 0:
+            vol_ratio = current_vol1 / current_vol2
         
         return vol_ratio, current_vol1, current_vol2
         
@@ -119,62 +124,122 @@ def calculate_volatility_ratio(df1, df2, window=20):
         print(f"❌ Error calculating volatility ratio: {e}")
         return 1.0, 0.0, 0.0
 
-def calculate_pair_z_score(pair1, pair2, window=20, timeframe="1h"):
-    """Tính z-score cho một cặp pairs và trả về thêm volatility info"""
+def calculate_pair_z_score(pair1, pair2, window=60, timeframe="1h"):
+    """
+    Tính z-score của spread chuẩn hóa giữa 2 tài sản với hedge ratio:
+    - Align theo timestamp
+    - Ước lượng hedge ratio beta (và alpha) bằng OLS
+    - Rolling mean/std của spread
+    - Xử lý NaN và division by zero
+    """
     try:
-        # Lấy dữ liệu cho cả hai pairs từ Binance API
-        df1 = get_klines_data(pair1, interval=timeframe, limit=168)
-        df2 = get_klines_data(pair2, interval=timeframe, limit=168)
+        # Lấy nhiều dữ liệu hơn cho OLS estimation
+        df1 = get_klines_data(pair1, interval=timeframe, limit=max(500, window+100))
+        df2 = get_klines_data(pair2, interval=timeframe, limit=max(500, window+100))
         
-        if df1 is None or df2 is None or len(df1) < window or len(df2) < window:
+        if df1 is None or df2 is None:
             return None, None, None, None, None, None, None
         
-        # Tính spread giữa hai pairs
-        spread = df1['close'] - df2['close']
+        # Chỉ giữ cột cần thiết, đổi tên cho dễ join
+        a = df1[['timestamp','close']].rename(columns={'close': 'A'})
+        b = df2[['timestamp','close']].rename(columns={'close': 'B'})
         
-        # Tính rolling mean và std của spread
-        rolling_mean = spread.rolling(window=window).mean()
-        rolling_std = spread.rolling(window=window).std()
+        # Align dữ liệu theo timestamp (inner join để tránh lệch nến)
+        df = pd.merge(a, b, on='timestamp', how='inner').sort_values('timestamp').reset_index(drop=True)
         
-        # Tính z-score của spread
-        z_score = (spread - rolling_mean) / rolling_std
+        # Đảm bảo đủ dữ liệu
+        if len(df) < max(window, 50):
+            return None, None, None, None, None, None, None
         
-        # Lấy giá trị hiện tại
-        current_spread = spread.iloc[-1]
-        current_z_score = z_score.iloc[-1]
-        current_mean = rolling_mean.iloc[-1]
-        current_std = rolling_std.iloc[-1]
+        # Sử dụng log-price để giảm hiệu ứng scale
+        df['logA'] = np.log(df['A'])
+        df['logB'] = np.log(df['B'])
         
-        # Tính volatility ratio để chọn coin biến động mạnh hơn
-        vol_ratio, vol1, vol2 = calculate_volatility_ratio(df1, df2, window)
+        # Ước lượng alpha, beta bằng OLS (trên toàn bộ mẫu gần đây)
+        # beta = cov(B,A)/var(B); alpha = mean(A) - beta*mean(B)
+        cov_matrix = np.cov(df['logB'], df['logA'], ddof=1)
+        var_B = np.var(df['logB'], ddof=1)
         
-        return current_z_score, current_spread, current_mean, current_std, vol_ratio, vol1, vol2
+        if var_B == 0 or np.isnan(var_B):
+            return None, None, None, None, None, None, None
+            
+        beta = cov_matrix[0,1] / var_B
+        alpha = df['logA'].mean() - beta * df['logB'].mean()
+        
+        # Residual (spread) = logA - (alpha + beta*logB)
+        df['spread'] = df['logA'] - (alpha + beta * df['logB'])
+        
+        # Rolling stats trên spread
+        roll_mean = df['spread'].rolling(window=window, min_periods=window).mean()
+        roll_std = df['spread'].rolling(window=window, min_periods=window).std(ddof=1)
+        
+        # Tránh chia 0 và thay thế bằng NaN
+        roll_std = roll_std.replace(0, np.nan)
+        
+        # Tính z-score
+        df['zscore'] = (df['spread'] - roll_mean) / roll_std
+        
+        # Giá trị hiện tại (bỏ NaN đầu window)
+        valid = df.dropna(subset=['zscore', 'spread'])
+        if valid.empty:
+            return None, None, None, None, None, None, None
+        
+        last = valid.iloc[-1]
+        
+        # Volatility info (trên log-returns để công bằng)
+        df['rA'] = df['logA'].diff()
+        df['rB'] = df['logB'].diff()
+        volA = df['rA'].rolling(window=window).std(ddof=1).iloc[-1]
+        volB = df['rB'].rolling(window=window).std(ddof=1).iloc[-1]
+        
+        vol_ratio = np.nan
+        if pd.notna(volA) and pd.notna(volB) and volB != 0:
+            vol_ratio = volA / volB
+        
+        return (
+            float(last['zscore']),
+            float(last['spread']), 
+            float(roll_mean.iloc[-1]),
+            float(roll_std.iloc[-1]),
+            float(vol_ratio) if pd.notna(vol_ratio) else None,
+            float(volA) if pd.notna(volA) else None,
+            float(volB) if pd.notna(volB) else None
+        )
         
     except Exception as e:
-        print(f"❌ Error calculating pair z-score for {pair1}-{pair2}: {e}")
+        print(f"❌ Error calculating improved pair z-score for {pair1}-{pair2}: {e}")
         return None, None, None, None, None, None, None
 
-def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
-    """Tính z-score với 4 lớp confirmation: RSI, MACD, Bollinger Bands, Linear Regression (track BUY/SELL confirmations separately)"""
+
+def calculate_pair_z_score_batch(pairs_batch, window=60, timeframe="1h"):
+    """
+    Simplified signal generation với 2 điều kiện:
+    1. Z-score > 2.5 hoặc < -2.5
+    2. Bollinger Bands breakout: dưới band → LONG, trên band → SHORT
+    """
     results = []
     
     for pair in pairs_batch:
         pair1 = pair['pair1']
         pair2 = pair['pair2']
         
-        # Lấy z-score
-        z_score, spread, mean, std, vol_ratio, vol1, vol2 = calculate_pair_z_score(pair1, pair2, window, timeframe)
+        # Lấy z-score với improved method
+        z_score, spread, rolling_mean, rolling_std, vol_ratio, volA, volB = calculate_pair_z_score(pair1, pair2, window, timeframe)
         
-        if z_score is None or abs(z_score) < 2.0:
+        # Điều kiện 1: Z-score threshold
+        if z_score is None or abs(z_score) < 2.5:
             continue
             
         try:
-            df1 = get_klines_data(pair1, interval=timeframe, limit=168)
-            df2 = get_klines_data(pair2, interval=timeframe, limit=168)
+            # Chọn coin có momentum mạnh hơn để trade
+            df1 = get_klines_data(pair1, interval=timeframe, limit=max(500, window+100))
+            df2 = get_klines_data(pair2, interval=timeframe, limit=max(500, window+100))
             if df1 is None or df2 is None:
                 continue
-            momentum1 = (df1['close'].iloc[-1] - df1['close'].iloc[-5]) / df1['close'].iloc[-5]
-            momentum2 = (df2['close'].iloc[-1] - df2['close'].iloc[-5]) / df2['close'].iloc[-5]
+                
+            momentum1 = (df1['close'].iloc[-1] - df1['close'].iloc[-10]) / df1['close'].iloc[-10]
+            momentum2 = (df2['close'].iloc[-1] - df2['close'].iloc[-10]) / df2['close'].iloc[-10]
+            
             if abs(momentum1) > abs(momentum2):
                 selected_coin = pair1
                 selected_df = df1
@@ -182,180 +247,47 @@ def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
                 selected_coin = pair2
                 selected_df = df2
 
-            # Track confirmations for BUY/SELL
-            buy_confirms = 0
-            sell_confirms = 0
-            confirmation_details = []
-            rsi_confirmed = False
-            macd_confirmed = False
-            bollinger_confirmed = False
-            linear_confirmed = False
-
-            # RSI Confirmation
-            def calculate_rsi(prices, window=14):
-                delta = prices.diff()
-                gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-                rs = gain / loss
-                rsi = 100 - (100 / (1 + rs))
-                return rsi
-            rsi = calculate_rsi(selected_df['close'])
-            price_current = selected_df['close'].iloc[-1]
-            price_prev = selected_df['close'].iloc[-10]
-            rsi_current = rsi.iloc[-1]
-            rsi_prev = rsi.iloc[-10]
-            if price_current < price_prev and rsi_current > rsi_prev:
-                buy_confirms += 1
-                rsi_confirmed = True
-                confirmation_details.append("RSI_BULLISH_DIVERGENCE_BUY")
-                print(f"✅ {pair1}-{pair2}: RSI bullish divergence (BUY)")
-            elif price_current > price_prev and rsi_current < rsi_prev:
-                sell_confirms += 1
-                rsi_confirmed = True
-                confirmation_details.append("RSI_BEARISH_DIVERGENCE_SELL")
-                print(f"✅ {pair1}-{pair2}: RSI bearish divergence (SELL)")
-            elif price_current > price_prev and rsi_current > rsi_prev:
-                buy_confirms += 1
-                rsi_confirmed = True
-                confirmation_details.append("RSI_TREND_UP_BUY")
-                print(f"✅ {pair1}-{pair2}: RSI trend UP (BUY)")
-            elif price_current < price_prev and rsi_current < rsi_prev:
-                sell_confirms += 1
-                rsi_confirmed = True
-                confirmation_details.append("RSI_TREND_DOWN_SELL")
-                print(f"✅ {pair1}-{pair2}: RSI trend DOWN (SELL)")
-            elif rsi_current < 30:
-                buy_confirms += 1
-                rsi_confirmed = True
-                confirmation_details.append(f"RSI_OVERSOLD_{rsi_current:.1f}_BUY")
-                print(f"✅ {pair1}-{pair2}: RSI oversold ({rsi_current:.1f}) (BUY)")
-            elif rsi_current > 70:
-                sell_confirms += 1
-                rsi_confirmed = True
-                confirmation_details.append(f"RSI_OVERBOUGHT_{rsi_current:.1f}_SELL")
-                print(f"✅ {pair1}-{pair2}: RSI overbought ({rsi_current:.1f}) (SELL)")
-
-            # MACD Confirmation
-            def calculate_macd(prices, fast=12, slow=26, signal=9):
-                ema_fast = prices.ewm(span=fast).mean()
-                ema_slow = prices.ewm(span=slow).mean()
-                macd_line = ema_fast - ema_slow
-                signal_line = macd_line.ewm(span=signal).mean()
-                return macd_line, signal_line
-            macd_line, signal_line = calculate_macd(selected_df['close'])
-            
-            if macd_line.iloc[-1] > signal_line.iloc[-1] and macd_line.iloc[-2] <= signal_line.iloc[-2]:
-                buy_confirms += 1
-                macd_confirmed = True
-                confirmation_details.append("MACD_BULLISH_CROSSOVER_BUY")
-                print(f"✅ {pair1}-{pair2}: MACD bullish crossover (BUY)")
-            elif macd_line.iloc[-1] < signal_line.iloc[-1] and macd_line.iloc[-2] >= signal_line.iloc[-2]:
-                sell_confirms += 1
-                macd_confirmed = True
-                confirmation_details.append("MACD_BEARISH_CROSSOVER_SELL")
-                print(f"✅ {pair1}-{pair2}: MACD bearish crossover (SELL)")
-            elif macd_line.iloc[-1] > signal_line.iloc[-1]:
-                buy_confirms += 1
-                macd_confirmed = True
-                confirmation_details.append("MACD_BULLISH_MOMENTUM_BUY")
-                print(f"✅ {pair1}-{pair2}: MACD bullish momentum (BUY)")
-            elif macd_line.iloc[-1] < signal_line.iloc[-1]:
-                sell_confirms += 1
-                macd_confirmed = True
-                confirmation_details.append("MACD_BEARISH_MOMENTUM_SELL")
-                print(f"✅ {pair1}-{pair2}: MACD bearish momentum (SELL)")
-
-            # Bollinger Bands Confirmation
+            # Điều kiện 2: Bollinger Bands breakout
             def calculate_bollinger_bands(prices, window=20, std_dev=2):
                 sma = prices.rolling(window=window).mean()
                 std = prices.rolling(window=window).std()
                 upper_band = sma + (std * std_dev)
                 lower_band = sma - (std * std_dev)
                 return upper_band, sma, lower_band
-            upper_band, middle_band, lower_band = calculate_bollinger_bands(selected_df['close'])
-            current_price = selected_df['close'].iloc[-1]
-            if current_price > upper_band.iloc[-1]:
-                buy_confirms += 1
-                bollinger_confirmed = True
-                confirmation_details.append("BOLLINGER_BREAKOUT_UP_BUY")
-                print(f"✅ {pair1}-{pair2}: Bollinger breakout UP (BUY)")
-            elif current_price < lower_band.iloc[-1]:
-                sell_confirms += 1
-                bollinger_confirmed = True
-                confirmation_details.append("BOLLINGER_BREAKOUT_DOWN_SELL")
-                print(f"✅ {pair1}-{pair2}: Bollinger breakout DOWN (SELL)")
-            elif current_price > middle_band.iloc[-1]:
-                buy_confirms += 1
-                bollinger_confirmed = True
-                confirmation_details.append("BOLLINGER_ABOVE_MIDDLE_BUY")
-                print(f"✅ {pair1}-{pair2}: Bollinger above middle band (BUY)")
-            elif current_price < middle_band.iloc[-1]:
-                sell_confirms += 1
-                bollinger_confirmed = True
-                confirmation_details.append("BOLLINGER_BELOW_MIDDLE_SELL")
-                print(f"✅ {pair1}-{pair2}: Bollinger below middle band (SELL)")
-
-            # Linear Regression Confirmation (24 nến)
-            def calculate_linear_trend_with_distance(prices, window=24):
-                if len(prices) < window:
-                    return None, None, None
-                recent_prices = prices.tail(window).values
-                X = np.arange(len(recent_prices)).reshape(-1, 1)
-                y = recent_prices.reshape(-1, 1)
-                model = LinearRegression().fit(X, y)
-                slope = model.coef_[0][0]
-                
-                # Tính khoảng cách từ giá hiện tại đến đường trendline
-                current_price = recent_prices[-1]
-                predicted_price = model.predict([[window-1]])[0][0]
-                distance = abs(current_price - predicted_price)
-                
-                # Tính độ lệch chuẩn của residuals để so sánh
-                residuals = recent_prices.flatten() - model.predict(X).flatten()
-                std_residuals = np.std(residuals)
-                
-                return slope, distance, std_residuals
             
-            linear_result = calculate_linear_trend_with_distance(selected_df['close'])
-            if linear_result is not None:
-                slope, distance, std_residuals = linear_result
-                threshold = 0.001
-                distance_threshold = 1.5 * std_residuals  # Khoảng cách tối đa cho phép
-                
-                if slope > threshold and distance <= distance_threshold:
-                    buy_confirms += 1
-                    linear_confirmed = True
-                    confirmation_details.append(f"LINEAR_TREND_UP_{slope:.6f}_BUY")
-                    print(f"✅ {pair1}-{pair2}: Linear trend UP (BUY, slope: {slope:.6f}, distance: {distance:.4f})")
-                elif slope < -threshold and distance <= distance_threshold:
-                    sell_confirms += 1
-                    linear_confirmed = True
-                    confirmation_details.append(f"LINEAR_TREND_DOWN_{slope:.6f}_SELL")
-                    print(f"✅ {pair1}-{pair2}: Linear trend DOWN (SELL, slope: {slope:.6f}, distance: {distance:.4f})")
-                elif distance > distance_threshold:
-                    print(f"⚠️ {pair1}-{pair2}: Giá hiện tại cách trendline quá xa (distance: {distance:.4f} > {distance_threshold:.4f})")
-
-            total_confirms = buy_confirms + sell_confirms
+            upper_band, lower_band = calculate_bollinger_bands(selected_df['close'])
+            current_price = selected_df['close'].iloc[-1]
+            
             signal_type = None
-            if buy_confirms >= 3:
-                signal_type = "BUY"
-            elif sell_confirms >= 3:
-                signal_type = "SELL"
+            signal_reason = ""
+            
+            # Logic quyết định signal
+            if current_price < lower_band.iloc[-1]:
+                signal_type = "BUY"  # Long khi vượt qua biên dưới
+                signal_reason = f"BB_BREAKOUT_DOWN (Price: {current_price:.4f} < Lower: {lower_band.iloc[-1]:.4f})"
+                print(f"🟢 {pair1}-{pair2}: Z-score {z_score:.3f} + Bollinger breakout DOWN → LONG {selected_coin}")
+                
+            elif current_price > upper_band.iloc[-1]:
+                signal_type = "SELL"  # Short khi vượt qua biên trên
+                signal_reason = f"BB_BREAKOUT_UP (Price: {current_price:.4f} > Upper: {upper_band.iloc[-1]:.4f})"
+                print(f"🔴 {pair1}-{pair2}: Z-score {z_score:.3f} + Bollinger breakout UP → SHORT {selected_coin}")
             else:
-                signal_type = None  # Không đủ 3 confirmations cho cùng 1 hướng
+                print(f"⚪ {pair1}-{pair2}: Z-score {z_score:.3f} nhưng giá trong Bollinger bands → Không trade")
+                continue
 
             if signal_type is not None:
                 selected_close = float(selected_df['close'].iloc[-1])
+                
+                # Tính TP/SL
                 if signal_type == "BUY":
-                    tp = round(selected_close * 1.02, 4)
-                    sl = round(selected_close * 0.98, 4)
+                    tp = round(selected_close * 1.02, 4)  # +2% TP
+                    sl = round(selected_close * 0.98, 4)  # -2% SL
                     entry = round(selected_close, 4)
-                    print(f" {pair1}-{pair2}: {total_confirms}/4 confirmations → BUY {selected_coin}")
                 else:  # SELL
-                    tp = round(selected_close * 0.98, 4)
-                    sl = round(selected_close * 1.02, 4)
+                    tp = round(selected_close * 0.98, 4)  # -2% TP
+                    sl = round(selected_close * 1.02, 4)  # +2% SL
                     entry = round(selected_close, 4)
-                    print(f" {pair1}-{pair2}: {total_confirms}/4 confirmations → SELL {selected_coin}")
+                
                 results.append({
                     'pair1': pair1,
                     'pair2': pair2,
@@ -367,18 +299,13 @@ def calculate_pair_z_score_batch(pairs_batch, window=20, timeframe="1h"):
                     'tp': tp,
                     'sl': sl,
                     'entry': entry,
-                    'confirmations': total_confirms,
-                    'rsi_confirmation': rsi_confirmed,
-                    'macd_confirmation': macd_confirmed,
-                    'bollinger_confirmation': bollinger_confirmed,
-                    'linear_confirmation': linear_confirmed,
-                    'confirmation_details': '; '.join(confirmation_details)
+                    'confirmation_details': f"Z_SCORE_{z_score:.3f}; {signal_reason}"
                 })
-            else:
-                print(f"⚪ {pair1}-{pair2}: Không đủ xác nhận hoặc BUY/SELL bằng nhau → Không trade")
+                
         except Exception as e:
             print(f"❌ Lỗi phân tích {pair1}-{pair2}: {e}")
             continue
+            
     return results
 
 def generate_signals_for_top_pairs(timeframe="1h"):
@@ -397,7 +324,7 @@ def generate_signals_for_top_pairs(timeframe="1h"):
     # Parallel processing
     all_signals = []
     with ThreadPoolExecutor(max_workers=4) as executor:
-        future_to_batch = {executor.submit(calculate_pair_z_score_batch, batch, 20, timeframe): batch for batch in batches}
+        future_to_batch = {executor.submit(calculate_pair_z_score_batch, batch, 60, timeframe): batch for batch in batches}
         completed = 0
         for future in as_completed(future_to_batch):
             batch_results = future.result()
