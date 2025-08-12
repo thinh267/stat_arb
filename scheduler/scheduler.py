@@ -7,6 +7,10 @@ from core.signal_generator import generate_and_save_signals
 from core.supabase_manager import SupabaseManager
 from config import HOURLY_UPDATE_INTERVAL, SIGNAL_CHECK_INTERVAL
 
+# Force fix SIGNAL_CHECK_INTERVAL cho scheduler  
+SIGNAL_CHECK_INTERVAL = 5
+print(f"🔧 Scheduler forcing SIGNAL_CHECK_INTERVAL = {SIGNAL_CHECK_INTERVAL} minutes")
+
 supabase_manager = SupabaseManager()
 
 def daily_task():
