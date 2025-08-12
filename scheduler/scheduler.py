@@ -46,12 +46,20 @@ def run_scheduler():
             time.sleep(30)
     # Run every 5 minutes
     def signal_loop():
+        last_minute = -1
         while True:
             now = datetime.now()
-            if now.minute % SIGNAL_CHECK_INTERVAL == 0:
+            current_minute = now.minute
+            
+            # Chạy khi minute chia hết cho SIGNAL_CHECK_INTERVAL và khác minute trước
+            if (current_minute % SIGNAL_CHECK_INTERVAL == 0 and 
+                current_minute != last_minute):
+                print(f"[Signal] Triggering at minute {current_minute} (interval: {SIGNAL_CHECK_INTERVAL})")
                 signal_task()
-                time.sleep(60)
-            time.sleep(30)
+                last_minute = current_minute
+                time.sleep(60)  # Đợi ít nhất 1 phút trước khi check lại
+            
+            time.sleep(10)  # Check mỗi 10 giây thay vì 30 giây
     threading.Thread(target=daily_loop, daemon=True).start()
     threading.Thread(target=hourly_loop, daemon=True).start()
     threading.Thread(target=signal_loop, daemon=True).start()

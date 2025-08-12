@@ -255,7 +255,7 @@ def calculate_pair_z_score_batch(pairs_batch, window=60, timeframe="1h"):
                 lower_band = sma - (std * std_dev)
                 return upper_band, sma, lower_band
             
-            upper_band, lower_band = calculate_bollinger_bands(selected_df['close'])
+            upper_band, middle_band, lower_band = calculate_bollinger_bands(selected_df['close'])
             current_price = selected_df['close'].iloc[-1]
             
             signal_type = None
@@ -367,8 +367,8 @@ def generate_and_save_signals():
     # Bỏ logic check thời gian để tránh bỏ lỡ signals quan trọng
     # Chỉ dựa vào database check để filter trùng lặp
     
-    # Tạo signals cho top pairs với timeframe 1h
-    signals = generate_signals_for_top_pairs(timeframe="1h")
+    # Tạo signals cho top pairs với timeframe 5m
+    signals = generate_signals_for_top_pairs(timeframe="5m")
     
     if not signals:
         print("❌ Không tạo được signals")
