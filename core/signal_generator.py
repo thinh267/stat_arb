@@ -278,15 +278,28 @@ def calculate_pair_z_score_batch(pairs_batch, window=60, timeframe="1h"):
             if signal_type is not None:
                 selected_close = float(selected_df['close'].iloc[-1])
                 
-                # Tính TP/SL
+                # Detect precision từ current price để match exchange format
+                def get_price_precision(price):
+                    """Detect số decimal places từ price để match exchange format"""
+                    price_str = f"{price:.10f}".rstrip('0').rstrip('.')
+                    if '.' in price_str:
+                        return len(price_str.split('.')[1])
+                    return 0
+                
+                precision = get_price_precision(selected_close)
+                # Minimum 2 decimal places, maximum 8 cho crypto (ETH ~2, altcoins có thể >6)
+                precision = max(2, min(8, precision))
+                print(f"💰 Price precision detected: {precision} decimals for {selected_coin}")
+                
+                # Tính TP/SL với cùng precision như entry
                 if signal_type == "BUY":
-                    tp = round(selected_close * 1.02, 4)  # +2% TP
-                    sl = round(selected_close * 0.98, 4)  # -2% SL
-                    entry = round(selected_close, 4)
+                    tp = round(selected_close * 1.02, precision)  # +2% TP
+                    sl = round(selected_close * 0.98, precision)  # -2% SL
+                    entry = round(selected_close, precision)
                 else:  # SELL
-                    tp = round(selected_close * 0.98, 4)  # -2% TP
-                    sl = round(selected_close * 1.02, 4)  # +2% SL
-                    entry = round(selected_close, 4)
+                    tp = round(selected_close * 0.98, precision)  # -2% TP
+                    sl = round(selected_close * 1.02, precision)  # +2% SL
+                    entry = round(selected_close, precision)
                 
                 results.append({
                     'pair1': pair1,
