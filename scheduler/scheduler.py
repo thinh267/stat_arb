@@ -8,7 +8,7 @@ from core.supabase_manager import SupabaseManager
 from config import HOURLY_UPDATE_INTERVAL, SIGNAL_CHECK_INTERVAL
 
 # Force fix SIGNAL_CHECK_INTERVAL cho scheduler  
-SIGNAL_CHECK_INTERVAL = 5
+SIGNAL_CHECK_INTERVAL = 15
 print(f"🔧 Scheduler forcing SIGNAL_CHECK_INTERVAL = {SIGNAL_CHECK_INTERVAL} minutes")
 
 supabase_manager = SupabaseManager()
@@ -23,12 +23,12 @@ def hourly_task():
 
 def signal_task():
     print(f"[Signal] {datetime.now()} - Generating trading signals...")
-    print(f"[Signal] Đang tạo signals cho timeframe 5m...")
+    print(f"[Signal] Đang tạo signals cho timeframe 15m...")
     signals = generate_and_save_signals()
     if signals:
-        print(f"[Signal] ✅ Hoàn thành tạo và lưu signals cho timeframe 5m")
+        print(f"[Signal] ✅ Hoàn thành tạo và lưu signals cho timeframe 15m")
     else:
-        print(f"[Signal] ⚠️ Không có signals nào cho timeframe 5m")
+        print(f"[Signal] ⚠️ Không có signals nào cho timeframe 15m")
 
 def run_scheduler():
     # Run daily at 9:00
@@ -48,7 +48,7 @@ def run_scheduler():
                 hourly_task()
                 time.sleep(60)
             time.sleep(30)
-    # Run every 5 minutes
+    # Run every 15 minutes
     def signal_loop():
         last_minute = -1
         while True:

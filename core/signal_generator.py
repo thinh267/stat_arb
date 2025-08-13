@@ -291,15 +291,19 @@ def calculate_pair_z_score_batch(pairs_batch, window=60, timeframe="1h"):
                 precision = max(2, min(8, precision))
                 print(f"💰 Price precision detected: {precision} decimals for {selected_coin}")
                 
-                # Tính TP/SL với cùng precision như entry
+                # Tính TP/SL: TP = middle band, SL = 2%
+                middle_band_price = float(middle_band.iloc[-1])
+                
                 if signal_type == "BUY":
-                    tp = round(selected_close * 1.02, precision)  # +2% TP
+                    tp = round(middle_band_price, precision)  # TP = middle band
                     sl = round(selected_close * 0.98, precision)  # -2% SL
                     entry = round(selected_close, precision)
+                    print(f"📊 BUY: Entry {entry} → TP {tp} (middle band) | SL {sl} (-2%)")
                 else:  # SELL
-                    tp = round(selected_close * 0.98, precision)  # -2% TP
+                    tp = round(middle_band_price, precision)  # TP = middle band  
                     sl = round(selected_close * 1.02, precision)  # +2% SL
                     entry = round(selected_close, precision)
+                    print(f"📊 SELL: Entry {entry} → TP {tp} (middle band) | SL {sl} (+2%)")
                 
                 results.append({
                     'pair1': pair1,
@@ -380,8 +384,8 @@ def generate_and_save_signals():
     # Bỏ logic check thời gian để tránh bỏ lỡ signals quan trọng
     # Chỉ dựa vào database check để filter trùng lặp
     
-    # Tạo signals cho top pairs với timeframe 5m
-    signals = generate_signals_for_top_pairs(timeframe="5m")
+    # Tạo signals cho top pairs với timeframe 15m
+    signals = generate_signals_for_top_pairs(timeframe="15m")
     
     if not signals:
         print("❌ Không tạo được signals")
